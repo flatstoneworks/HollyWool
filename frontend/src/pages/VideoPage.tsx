@@ -125,6 +125,7 @@ export function VideoPage() {
   // Video generation state - track jobs by ID like ImagePage
   const [activeJobs, setActiveJobs] = useState<Record<string, VideoJob>>({})
   const [completedJobs, setCompletedJobs] = useState<VideoJob[]>([])
+  const [failedJobs, setFailedJobs] = useState<VideoJob[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -154,23 +155,28 @@ export function VideoPage() {
       try {
         const { jobs } = await api.getVideoJobs({ session_id: currentSession.id })
 
-        // Separate active and completed jobs
+        // Separate active, completed, and failed jobs
         const active: Record<string, VideoJob> = {}
         const completed: VideoJob[] = []
+        const failed: VideoJob[] = []
 
         for (const job of jobs) {
           if (job.status === 'completed' && job.video) {
             completed.push(job)
+          } else if (job.status === 'failed') {
+            failed.push(job)
           } else if (!['completed', 'failed'].includes(job.status)) {
             active[job.id] = job
           }
         }
 
-        // Sort completed by created_at descending
+        // Sort by created_at descending
         completed.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        failed.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
-        setActiveJobs(prev => ({ ...prev, ...active }))
+        setActiveJobs(active)
         setCompletedJobs(completed)
+        setFailedJobs(failed)
       } catch (err) {
         console.error('Failed to load session videos:', err)
       }
@@ -201,13 +207,28 @@ export function VideoPage() {
           if (updatedJob.status === 'completed' && updatedJob.session_id === currentSession?.id) {
             // Add to completed jobs for this session
             setCompletedJobs(prev => [updatedJob, ...prev.filter(j => j.id !== updatedJob.id)])
+            // Remove from active jobs
+            setActiveJobs(prev => {
+              const next = { ...prev }
+              delete next[jobId]
+              return next
+            })
             // Update session thumbnail with first frame
             if (updatedJob.video?.url) {
               updateVideoSession(updatedJob.session_id, { thumbnail: updatedJob.video.url })
               setSessions(getVideoSessions())
             }
           } else if (updatedJob.status === 'failed') {
-            setError(updatedJob.error || 'Video generation failed')
+            // Add to failed jobs for this session
+            if (updatedJob.session_id === currentSession?.id) {
+              setFailedJobs(prev => [updatedJob, ...prev.filter(j => j.id !== updatedJob.id)])
+            }
+            // Remove from active jobs
+            setActiveJobs(prev => {
+              const next = { ...prev }
+              delete next[jobId]
+              return next
+            })
           }
         } catch (err) {
           console.error('Failed to poll job status:', err)
@@ -554,8 +575,35 @@ export function VideoPage() {
               </div>
             )}
 
+            {/* Failed jobs for this session */}
+            {failedJobs.length > 0 && (
+              <div className="max-w-2xl mx-auto space-y-4">
+                {failedJobs.map((job) => (
+                  <div key={job.id} className="p-4 rounded-xl bg-red-500/10 border border-red-500/20">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-red-300">Generation failed</p>
+                        <p className="text-xs text-white/60 mt-1 truncate">"{job.prompt}"</p>
+                        {job.error && (
+                          <p className="text-xs text-red-300/80 mt-2 line-clamp-3">{job.error}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setFailedJobs(prev => prev.filter(j => j.id !== job.id))}
+                        className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                        title="Dismiss"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Empty state - only show when no videos and not generating */}
-            {completedJobs.length === 0 && currentSessionActiveJobs.length === 0 && (
+            {completedJobs.length === 0 && currentSessionActiveJobs.length === 0 && failedJobs.length === 0 && (
               <div className="text-center py-20">
                 <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-6">
                   <Sparkles className="h-10 w-10 text-white/20" />

@@ -236,3 +236,27 @@ class VideoJobResponse(BaseModel):
 
 class VideoJobListResponse(BaseModel):
     jobs: list[VideoJob]
+
+
+# Video asset for gallery
+class VideoAssetMetadata(BaseModel):
+    id: str
+    filename: str
+    url: str
+    type: str = "video"
+    prompt: str
+    model: str
+    width: int
+    height: int
+    steps: int
+    guidance_scale: float
+    seed: int
+    num_frames: int
+    fps: int
+    duration: float
+    created_at: datetime
+
+
+class VideoAssetListResponse(BaseModel):
+    assets: list[VideoAssetMetadata]
+    total: int

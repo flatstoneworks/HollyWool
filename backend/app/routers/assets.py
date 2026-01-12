@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from ..models.schemas import AssetMetadata, AssetListResponse
+from ..models.schemas import AssetMetadata, AssetListResponse, VideoAssetMetadata, VideoAssetListResponse
 
 router = APIRouter(prefix="/api", tags=["assets"])
 
@@ -146,3 +146,85 @@ async def save_sessions_endpoint(data: SessionsData):
     """Save all sessions."""
     save_sessions(data)
     return data
+
+
+# Video assets endpoints
+def load_video_asset_metadata(metadata_path: Path) -> Optional[VideoAssetMetadata]:
+    """Load video asset metadata from JSON file."""
+    try:
+        with open(metadata_path, "r") as f:
+            data = json.load(f)
+            # Only load video assets
+            if data.get("type") != "video":
+                return None
+            data["url"] = f"/outputs/{data['filename']}"
+            data["created_at"] = datetime.fromisoformat(data["created_at"])
+            return VideoAssetMetadata(**data)
+    except Exception:
+        return None
+
+
+@router.get("/video-assets", response_model=VideoAssetListResponse)
+async def list_video_assets(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    model: Optional[str] = Query(default=None),
+):
+    """List all video assets in the gallery."""
+    output_dir = get_output_dir()
+
+    # Get all metadata files sorted by modification time (newest first)
+    metadata_files = sorted(
+        output_dir.glob("*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    assets = []
+    for metadata_path in metadata_files:
+        asset = load_video_asset_metadata(metadata_path)
+        if asset:
+            # Filter by model if specified
+            if model and asset.model != model:
+                continue
+            assets.append(asset)
+
+    total = len(assets)
+    assets = assets[offset : offset + limit]
+
+    return VideoAssetListResponse(assets=assets, total=total)
+
+
+@router.get("/video-assets/{asset_id}")
+async def get_video_asset(asset_id: str):
+    """Get a specific video asset."""
+    output_dir = get_output_dir()
+    metadata_path = output_dir / f"{asset_id}.json"
+
+    if not metadata_path.exists():
+        raise HTTPException(status_code=404, detail="Video asset not found")
+
+    asset = load_video_asset_metadata(metadata_path)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Video asset metadata corrupted or not a video")
+
+    return asset
+
+
+@router.delete("/video-assets/{asset_id}")
+async def delete_video_asset(asset_id: str):
+    """Delete a video asset."""
+    output_dir = get_output_dir()
+    video_path = output_dir / f"{asset_id}.mp4"
+    metadata_path = output_dir / f"{asset_id}.json"
+
+    if not metadata_path.exists():
+        raise HTTPException(status_code=404, detail="Video asset not found")
+
+    # Delete both files
+    if video_path.exists():
+        video_path.unlink()
+    if metadata_path.exists():
+        metadata_path.unlink()
+
+    return {"status": "deleted", "id": asset_id}

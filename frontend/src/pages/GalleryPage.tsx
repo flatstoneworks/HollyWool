@@ -3,11 +3,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Loader2, Trash2, Copy, X, ChevronLeft, ChevronRight,
   Search, Home, Wand2, ChevronDown, ChevronUp, Download,
-  MessageSquare, GripVertical
+  MessageSquare, GripVertical, ImageIcon, Film
 } from 'lucide-react'
-import { api, type Asset } from '@/api/client'
+import { api, type Asset, type VideoAsset } from '@/api/client'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+
+type MediaType = 'images' | 'videos'
 
 const MIN_SIDEBAR_WIDTH = 200
 const MAX_SIDEBAR_WIDTH = 350
@@ -15,7 +17,9 @@ const DEFAULT_SIDEBAR_WIDTH = 256
 
 export function GalleryPage() {
   const queryClient = useQueryClient()
+  const [mediaType, setMediaType] = useState<MediaType>('images')
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null)
+  const [selectedVideoAsset, setSelectedVideoAsset] = useState<VideoAsset | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedFilter, setSelectedFilter] = useState<string>('all')
   const [showAllModels, setShowAllModels] = useState(false)
@@ -25,16 +29,34 @@ export function GalleryPage() {
   const [isResizing, setIsResizing] = useState(false)
   const sidebarRef = useRef<HTMLDivElement>(null)
 
-  const { data, isLoading } = useQuery({
+  // Fetch image assets
+  const { data: imageData, isLoading: isLoadingImages } = useQuery({
     queryKey: ['assets'],
     queryFn: () => api.getAssets({ limit: 100 }),
   })
 
-  const deleteMutation = useMutation({
+  // Fetch video assets
+  const { data: videoData, isLoading: isLoadingVideos } = useQuery({
+    queryKey: ['video-assets'],
+    queryFn: () => api.getVideoAssets({ limit: 100 }),
+  })
+
+  const data = mediaType === 'images' ? imageData : undefined
+  const isLoading = mediaType === 'images' ? isLoadingImages : isLoadingVideos
+
+  const deleteImageMutation = useMutation({
     mutationFn: api.deleteAsset,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] })
       setSelectedAsset(null)
+    },
+  })
+
+  const deleteVideoMutation = useMutation({
+    mutationFn: api.deleteVideoAsset,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['video-assets'] })
+      setSelectedVideoAsset(null)
     },
   })
 
@@ -74,13 +96,14 @@ export function GalleryPage() {
     navigator.clipboard.writeText(text)
   }
 
-  const handleDownload = async (asset: Asset) => {
+  const handleDownload = async (asset: Asset | VideoAsset, isVideo: boolean) => {
     const response = await fetch(asset.url)
     const blob = await response.blob()
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${asset.prompt.slice(0, 30).replace(/[^a-z0-9]/gi, '_')}_${asset.seed}.png`
+    const ext = isVideo ? 'mp4' : 'png'
+    a.download = `${asset.prompt.slice(0, 30).replace(/[^a-z0-9]/gi, '_')}_${asset.seed}.${ext}`
     document.body.appendChild(a)
     a.click()
     window.URL.revokeObjectURL(url)
@@ -120,9 +143,9 @@ export function GalleryPage() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [selectedAsset, data?.assets])
 
-  // Compute model counts and filtered assets
+  // Compute model counts and filtered assets for images
   const { modelCounts, filteredAssets } = useMemo(() => {
-    const assets = data?.assets || []
+    const assets = imageData?.assets || []
     const counts: Record<string, number> = {}
 
     // Count assets per model
@@ -148,13 +171,48 @@ export function GalleryPage() {
     }
 
     return { modelCounts: counts, filteredAssets: filtered }
-  }, [data?.assets, selectedFilter, searchQuery])
+  }, [imageData?.assets, selectedFilter, searchQuery])
+
+  // Compute model counts and filtered assets for videos
+  const { videoModelCounts, filteredVideoAssets } = useMemo(() => {
+    const assets = videoData?.assets || []
+    const counts: Record<string, number> = {}
+
+    // Count assets per model
+    assets.forEach(asset => {
+      counts[asset.model] = (counts[asset.model] || 0) + 1
+    })
+
+    // Filter assets based on search and selected filter
+    let filtered = assets
+
+    // Apply model filter
+    if (selectedFilter !== 'all') {
+      filtered = filtered.filter(a => a.model === selectedFilter)
+    }
+
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      filtered = filtered.filter(a =>
+        a.prompt.toLowerCase().includes(query) ||
+        a.model.toLowerCase().includes(query)
+      )
+    }
+
+    return { videoModelCounts: counts, filteredVideoAssets: filtered }
+  }, [videoData?.assets, selectedFilter, searchQuery])
+
+  // Use correct data based on media type
+  const currentModelCounts = mediaType === 'images' ? modelCounts : videoModelCounts
+  const currentAssets = mediaType === 'images' ? filteredAssets : filteredVideoAssets
+  const totalCount = mediaType === 'images' ? (imageData?.assets.length || 0) : (videoData?.assets.length || 0)
 
   // Get sorted models for sidebar
   const sortedModels = useMemo(() => {
-    return Object.entries(modelCounts)
+    return Object.entries(currentModelCounts)
       .sort((a, b) => b[1] - a[1])
-  }, [modelCounts])
+  }, [currentModelCounts])
 
   const visibleModels = showAllModels ? sortedModels : sortedModels.slice(0, 5)
 
@@ -166,13 +224,11 @@ export function GalleryPage() {
     )
   }
 
-  if (!data?.assets.length) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center h-full text-muted-foreground">
-        <p className="text-lg">No images generated yet</p>
-        <p className="text-sm">Go to Generate to create your first image</p>
-      </div>
-    )
+  if (mediaType === 'images' && !imageData?.assets.length && !isLoadingImages) {
+    // Show full page empty state only for images if no images exist
+  }
+  if (mediaType === 'videos' && !videoData?.assets.length && !isLoadingVideos) {
+    // Show full page empty state only for videos if no videos exist
   }
 
   return (
@@ -183,6 +239,32 @@ export function GalleryPage() {
         style={{ width: sidebarWidth }}
         className="h-full border-r border-white/5 flex flex-col bg-black/20 flex-shrink-0 relative"
       >
+        {/* Media Type Toggle */}
+        <div className="p-3 border-b border-white/5">
+          <div className="flex rounded-lg bg-white/5 p-0.5">
+            <button
+              onClick={() => { setMediaType('images'); setSelectedFilter('all') }}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                mediaType === 'images' ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white/80'
+              )}
+            >
+              <ImageIcon className="h-4 w-4" />
+              <span>Images</span>
+            </button>
+            <button
+              onClick={() => { setMediaType('videos'); setSelectedFilter('all') }}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                mediaType === 'videos' ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white/80'
+              )}
+            >
+              <Film className="h-4 w-4" />
+              <span>Videos</span>
+            </button>
+          </div>
+        </div>
+
         {/* Search */}
         <div className="p-3 border-b border-white/5">
           <div className="relative">
@@ -217,7 +299,7 @@ export function GalleryPage() {
               'text-xs px-2 py-0.5 rounded-full',
               selectedFilter === 'all' ? 'bg-primary/30' : 'bg-white/10'
             )}>
-              {data.assets.length}
+              {totalCount}
             </span>
           </button>
 
@@ -291,22 +373,51 @@ export function GalleryPage() {
 
       {/* Main Gallery Grid */}
       <div className="flex-1 h-full overflow-y-auto">
-        <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {filteredAssets.map((asset) => (
-          <Card
-            key={asset.id}
-            className="aspect-square overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-            onClick={() => setSelectedAsset(asset)}
-          >
-            <img
-              src={asset.url}
-              alt={asset.prompt}
-              className="w-full h-full object-cover"
-              loading="lazy"
-            />
-          </Card>
-        ))}
-        </div>
+        {currentAssets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+            <p className="text-lg">No {mediaType} yet</p>
+            <p className="text-sm">Go to {mediaType === 'images' ? 'Image' : 'Video'} to create your first {mediaType === 'images' ? 'image' : 'video'}</p>
+          </div>
+        ) : (
+          <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {mediaType === 'images' ? (
+              filteredAssets.map((asset) => (
+                <Card
+                  key={asset.id}
+                  className="aspect-square overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                  onClick={() => setSelectedAsset(asset)}
+                >
+                  <img
+                    src={asset.url}
+                    alt={asset.prompt}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                </Card>
+              ))
+            ) : (
+              filteredVideoAssets.map((asset) => (
+                <Card
+                  key={asset.id}
+                  className="aspect-video overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all relative group"
+                  onClick={() => setSelectedVideoAsset(asset)}
+                >
+                  <video
+                    src={asset.url}
+                    className="w-full h-full object-cover"
+                    muted
+                    loop
+                    onMouseEnter={(e) => e.currentTarget.play()}
+                    onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0 }}
+                  />
+                  <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/60 text-xs text-white/80">
+                    {asset.duration.toFixed(1)}s
+                  </div>
+                </Card>
+              ))
+            )}
+          </div>
+        )}
       </div>
 
       {/* Lightbox */}
@@ -349,7 +460,7 @@ export function GalleryPage() {
             {/* Action buttons below image */}
             <div className="mt-4 flex items-center gap-2">
               <button
-                onClick={() => handleDownload(selectedAsset)}
+                onClick={() => handleDownload(selectedAsset, false)}
                 className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
                 title="Download"
               >
@@ -372,7 +483,7 @@ export function GalleryPage() {
               <button
                 onClick={() => {
                   if (confirm('Delete this image?')) {
-                    deleteMutation.mutate(selectedAsset.id)
+                    deleteImageMutation.mutate(selectedAsset.id)
                   }
                 }}
                 className="p-2 rounded-lg bg-white/10 hover:bg-red-500/50 transition-colors"
@@ -433,6 +544,122 @@ export function GalleryPage() {
               <div>
                 <span className="text-xs text-white/40">Created</span>
                 <p className="text-sm text-white/80">{new Date(selectedAsset.created_at).toLocaleString()}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Video Lightbox */}
+      {selectedVideoAsset && (
+        <div
+          className="fixed inset-0 z-50 bg-black/95 flex"
+          onClick={() => setSelectedVideoAsset(null)}
+        >
+          {/* Close button */}
+          <button
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors z-10"
+            onClick={() => setSelectedVideoAsset(null)}
+          >
+            <X className="h-6 w-6" />
+          </button>
+
+          {/* Main video area */}
+          <div className="flex-1 flex flex-col items-center justify-center p-8" onClick={(e) => e.stopPropagation()}>
+            <video
+              src={selectedVideoAsset.url}
+              controls
+              autoPlay
+              className="max-w-full max-h-[80vh] rounded-xl"
+            />
+
+            {/* Action buttons below video */}
+            <div className="mt-4 flex items-center gap-2">
+              <button
+                onClick={() => handleDownload(selectedVideoAsset, true)}
+                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                title="Download"
+              >
+                <Download className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => copyToClipboard(selectedVideoAsset.seed.toString())}
+                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                title="Copy seed"
+              >
+                <Copy className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => copyToClipboard(selectedVideoAsset.prompt)}
+                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
+                title="Copy prompt"
+              >
+                <MessageSquare className="h-5 w-5" />
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm('Delete this video?')) {
+                    deleteVideoMutation.mutate(selectedVideoAsset.id)
+                  }
+                }}
+                className="p-2 rounded-lg bg-white/10 hover:bg-red-500/50 transition-colors"
+                title="Delete"
+              >
+                <Trash2 className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Details sidebar */}
+          <div
+            className="w-[320px] h-full bg-[#111] border-l border-white/10 p-6 overflow-y-auto flex-shrink-0"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Prompt */}
+            <div className="mb-6">
+              <h3 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Prompt</h3>
+              <p className="text-sm text-white/80 leading-relaxed">{selectedVideoAsset.prompt}</p>
+            </div>
+
+            {/* Details grid */}
+            <div className="space-y-4">
+              <h3 className="text-xs font-medium text-white/40 uppercase tracking-wider">Details</h3>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className="text-xs text-white/40">Model</span>
+                  <p className="text-sm text-white/80">{selectedVideoAsset.model}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-white/40">Size</span>
+                  <p className="text-sm text-white/80">{selectedVideoAsset.width} × {selectedVideoAsset.height}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-white/40">Duration</span>
+                  <p className="text-sm text-white/80">{selectedVideoAsset.duration.toFixed(1)}s</p>
+                </div>
+                <div>
+                  <span className="text-xs text-white/40">FPS</span>
+                  <p className="text-sm text-white/80">{selectedVideoAsset.fps}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-white/40">Frames</span>
+                  <p className="text-sm text-white/80">{selectedVideoAsset.num_frames}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-white/40">Steps</span>
+                  <p className="text-sm text-white/80">{selectedVideoAsset.steps}</p>
+                </div>
+              </div>
+
+              <div>
+                <span className="text-xs text-white/40">Seed</span>
+                <p className="text-sm text-white/80 font-mono">{selectedVideoAsset.seed}</p>
+              </div>
+
+              <div>
+                <span className="text-xs text-white/40">Created</span>
+                <p className="text-sm text-white/80">{new Date(selectedVideoAsset.created_at).toLocaleString()}</p>
               </div>
             </div>
           </div>

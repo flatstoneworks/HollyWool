@@ -289,6 +289,30 @@ export interface VideoJobListResponse {
   jobs: VideoJob[]
 }
 
+// Video asset for gallery
+export interface VideoAsset {
+  id: string
+  filename: string
+  url: string
+  type: 'video'
+  prompt: string
+  model: string
+  width: number
+  height: number
+  steps: number
+  guidance_scale: number
+  seed: number
+  num_frames: number
+  fps: number
+  duration: number
+  created_at: string
+}
+
+export interface VideoAssetsResponse {
+  assets: VideoAsset[]
+  total: number
+}
+
 export const api = {
   async health(): Promise<HealthResponse> {
     const res = await fetch(`${API_BASE}/health`)
@@ -445,5 +469,29 @@ export const api = {
     const res = await fetch(url)
     if (!res.ok) throw new Error('Failed to fetch video jobs')
     return res.json()
+  },
+
+  // Video assets for gallery
+  async getVideoAssets(params?: { limit?: number; offset?: number; model?: string }): Promise<VideoAssetsResponse> {
+    const searchParams = new URLSearchParams()
+    if (params?.limit) searchParams.set('limit', params.limit.toString())
+    if (params?.offset) searchParams.set('offset', params.offset.toString())
+    if (params?.model) searchParams.set('model', params.model)
+
+    const url = `${API_BASE}/video-assets${searchParams.toString() ? `?${searchParams}` : ''}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Failed to fetch video assets')
+    return res.json()
+  },
+
+  async getVideoAsset(id: string): Promise<VideoAsset> {
+    const res = await fetch(`${API_BASE}/video-assets/${id}`)
+    if (!res.ok) throw new Error('Video asset not found')
+    return res.json()
+  },
+
+  async deleteVideoAsset(id: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/video-assets/${id}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error('Failed to delete video asset')
   },
 }
