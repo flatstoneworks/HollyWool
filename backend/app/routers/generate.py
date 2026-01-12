@@ -11,7 +11,8 @@ from pydantic import BaseModel
 from ..models.schemas import (
     GenerateRequest, GenerateResponse, ImageResult, ModelsResponse, HealthResponse,
     Job, JobResponse, JobListResponse, JobStatus,
-    ModelsDetailedResponse, CacheStatusResponse, CacheDeleteResponse
+    ModelsDetailedResponse, CacheStatusResponse, CacheDeleteResponse,
+    VideoGenerateRequest, VideoJob, VideoJobResponse, VideoJobListResponse,
 )
 
 
@@ -73,6 +74,7 @@ def generate_title_from_prompt(prompt: str) -> str:
 
 from ..services.inference import get_inference_service
 from ..services.jobs import get_job_manager
+from ..services.video_jobs import get_video_job_manager
 
 router = APIRouter(prefix="/api", tags=["generate"])
 
@@ -285,3 +287,58 @@ async def list_jobs(session_id: str = None, active_only: bool = False):
     jobs = sorted(jobs, key=lambda j: j.created_at, reverse=True)
 
     return JobListResponse(jobs=jobs)
+
+
+# ============== Video Generation Endpoints ==============
+
+@router.post("/video/jobs", response_model=VideoJobResponse)
+async def create_video_job(request: VideoGenerateRequest):
+    """Create a new video generation job. Returns immediately with job_id."""
+    service = get_inference_service()
+
+    # Validate model exists and is a video model
+    model_config = service.get_model_config(request.model)
+    if not model_config:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {request.model}")
+
+    if model_config.get("type") != "video":
+        raise HTTPException(status_code=400, detail=f"Model {request.model} is not a video model")
+
+    video_job_manager = get_video_job_manager()
+    job = video_job_manager.create_job(request)
+
+    return VideoJobResponse(
+        job_id=job.id,
+        status=job.status,
+        message=f"Video job queued. Estimated time: {int(job.eta_seconds or 0)}s"
+    )
+
+
+@router.get("/video/jobs/{job_id}", response_model=VideoJob)
+async def get_video_job(job_id: str):
+    """Get the status of a specific video job."""
+    video_job_manager = get_video_job_manager()
+    job = video_job_manager.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Video job not found")
+
+    return job
+
+
+@router.get("/video/jobs", response_model=VideoJobListResponse)
+async def list_video_jobs(session_id: str = None, active_only: bool = False):
+    """List video jobs, optionally filtered by session or active status."""
+    video_job_manager = get_video_job_manager()
+
+    if session_id:
+        jobs = video_job_manager.get_jobs_by_session(session_id)
+    elif active_only:
+        jobs = video_job_manager.get_active_jobs()
+    else:
+        jobs = list(video_job_manager.jobs.values())
+
+    # Sort by created_at descending
+    jobs = sorted(jobs, key=lambda j: j.created_at, reverse=True)
+
+    return VideoJobListResponse(jobs=jobs)

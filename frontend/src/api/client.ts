@@ -223,6 +223,72 @@ export interface CacheDeleteResponse {
   error?: string
 }
 
+// ============== Video Generation Types ==============
+
+export interface VideoGenerateRequest {
+  prompt: string
+  model: string
+  negative_prompt?: string
+  num_frames?: number
+  fps?: number
+  width?: number
+  height?: number
+  steps?: number
+  guidance_scale?: number
+  seed?: number
+  session_id?: string
+}
+
+export interface VideoResult {
+  id: string
+  filename: string
+  url: string
+  seed: number
+  duration: number
+  fps: number
+  num_frames: number
+  width: number
+  height: number
+}
+
+export interface VideoJob {
+  id: string
+  session_id: string | null
+  status: JobStatus
+  progress: number
+  current_frame: number
+  total_frames: number
+  eta_seconds: number | null
+  error: string | null
+  // Download progress
+  download_progress: number
+  download_total_mb: number | null
+  download_speed_mbps: number | null
+  // Request details
+  prompt: string
+  model: string
+  width: number
+  height: number
+  steps: number
+  num_frames: number
+  fps: number
+  // Result
+  video: VideoResult | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface VideoJobResponse {
+  job_id: string
+  status: string
+  message: string
+}
+
+export interface VideoJobListResponse {
+  jobs: VideoJob[]
+}
+
 export const api = {
   async health(): Promise<HealthResponse> {
     const res = await fetch(`${API_BASE}/health`)
@@ -348,6 +414,36 @@ export const api = {
     const url = `${API_BASE}/jobs${searchParams.toString() ? `?${searchParams}` : ''}`
     const res = await fetch(url)
     if (!res.ok) throw new Error('Failed to fetch jobs')
+    return res.json()
+  },
+
+  // Video generation endpoints
+  async createVideoJob(request: VideoGenerateRequest): Promise<VideoJobResponse> {
+    const res = await fetch(`${API_BASE}/video/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Failed to create video job' }))
+      throw new Error(error.detail || 'Failed to create video job')
+    }
+    return res.json()
+  },
+
+  async getVideoJob(jobId: string): Promise<VideoJob> {
+    const res = await fetch(`${API_BASE}/video/jobs/${jobId}`)
+    if (!res.ok) throw new Error('Video job not found')
+    return res.json()
+  },
+
+  async getVideoJobs(params?: { session_id?: string; active_only?: boolean }): Promise<VideoJobListResponse> {
+    const searchParams = new URLSearchParams()
+    if (params?.session_id) searchParams.set('session_id', params.session_id)
+    if (params?.active_only) searchParams.set('active_only', 'true')
+    const url = `${API_BASE}/video/jobs${searchParams.toString() ? `?${searchParams}` : ''}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Failed to fetch video jobs')
     return res.json()
   },
 }

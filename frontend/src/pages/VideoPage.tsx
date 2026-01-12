@@ -1,15 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import {
-  Sparkles, ChevronDown, Palette, ImagePlus, X, Wand2,
+  Sparkles, ChevronDown, Palette, X, Wand2,
   Plus, MessageSquare, MoreHorizontal, Pencil, GripVertical, Trash2, Square, Monitor,
-  AlertCircle
+  AlertCircle, Loader2, Download
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
   getVideoSessions, createVideoSession, setCurrentVideoSessionId, getCurrentVideoSessionId,
-  deleteVideoSession, renameVideoSession, ensureCurrentVideoSession,
+  deleteVideoSession, renameVideoSession, ensureCurrentVideoSession, updateVideoSession,
   type VideoSession
 } from '@/lib/video-sessions'
+import { api, VideoJob, VideoGenerateRequest } from '@/api/client'
 
 type AspectRatio = '16:9' | '9:16' | '1:1'
 type Resolution = '720p' | '1080p'
@@ -107,16 +108,9 @@ export function VideoPage() {
   const [showAspectMenu, setShowAspectMenu] = useState(false)
   const [showResolutionMenu, setShowResolutionMenu] = useState(false)
 
-  // Start and end frames
-  const [startFrame, setStartFrame] = useState<string | null>(null)
-  const [endFrame, setEndFrame] = useState<string | null>(null)
-  const startFrameInputRef = useRef<HTMLInputElement>(null)
-  const endFrameInputRef = useRef<HTMLInputElement>(null)
-
   // Session management (video sessions are separate from image sessions)
   const [sessions, setSessions] = useState<VideoSession[]>([])
   const [currentSession, setCurrentSession] = useState<VideoSession | null>(null)
-  const [showToast, setShowToast] = useState(false)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingName, setEditingName] = useState('')
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null)
@@ -128,12 +122,107 @@ export function VideoPage() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // Video generation state - track jobs by ID like ImagePage
+  const [activeJobs, setActiveJobs] = useState<Record<string, VideoJob>>({})
+  const [completedJobs, setCompletedJobs] = useState<VideoJob[]>([])
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
   // Initialize video sessions (separate from image sessions)
   useEffect(() => {
     const session = ensureCurrentVideoSession()
     setCurrentSession(session)
     setSessions(getVideoSessions())
   }, [])
+
+  // Helper to get dimensions from aspect ratio and resolution
+  const getDimensions = (aspect: AspectRatio, res: Resolution): { width: number; height: number } => {
+    const heights = { '720p': 720, '1080p': 1080 }
+    const h = heights[res]
+    switch (aspect) {
+      case '16:9': return { width: Math.round(h * 16 / 9), height: h }
+      case '9:16': return { width: Math.round(h * 9 / 16), height: h }
+      case '1:1': return { width: h, height: h }
+    }
+  }
+
+  // Load jobs for current session (both active and completed)
+  useEffect(() => {
+    if (!currentSession) return
+
+    const loadSessionJobs = async () => {
+      try {
+        const { jobs } = await api.getVideoJobs({ session_id: currentSession.id })
+
+        // Separate active and completed jobs
+        const active: Record<string, VideoJob> = {}
+        const completed: VideoJob[] = []
+
+        for (const job of jobs) {
+          if (job.status === 'completed' && job.video) {
+            completed.push(job)
+          } else if (!['completed', 'failed'].includes(job.status)) {
+            active[job.id] = job
+          }
+        }
+
+        // Sort completed by created_at descending
+        completed.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+        setActiveJobs(prev => ({ ...prev, ...active }))
+        setCompletedJobs(completed)
+      } catch (err) {
+        console.error('Failed to load session videos:', err)
+      }
+    }
+
+    loadSessionJobs()
+  }, [currentSession?.id])
+
+  // Poll for job status updates
+  useEffect(() => {
+    const hasActiveJobs = Object.values(activeJobs).some(
+      job => job && !['completed', 'failed'].includes(job.status)
+    )
+
+    if (!hasActiveJobs) return
+
+    const pollJobs = async () => {
+      const jobIds = Object.keys(activeJobs)
+
+      for (const jobId of jobIds) {
+        const job = activeJobs[jobId]
+        if (!job || job.status === 'completed' || job.status === 'failed') continue
+
+        try {
+          const updatedJob = await api.getVideoJob(jobId)
+          setActiveJobs(prev => ({ ...prev, [jobId]: updatedJob }))
+
+          if (updatedJob.status === 'completed' && updatedJob.session_id === currentSession?.id) {
+            // Add to completed jobs for this session
+            setCompletedJobs(prev => [updatedJob, ...prev.filter(j => j.id !== updatedJob.id)])
+            // Update session thumbnail with first frame
+            if (updatedJob.video?.url) {
+              updateVideoSession(updatedJob.session_id, { thumbnail: updatedJob.video.url })
+              setSessions(getVideoSessions())
+            }
+          } else if (updatedJob.status === 'failed') {
+            setError(updatedJob.error || 'Video generation failed')
+          }
+        } catch (err) {
+          console.error('Failed to poll job status:', err)
+        }
+      }
+    }
+
+    const interval = setInterval(pollJobs, 1000)
+    return () => clearInterval(interval)
+  }, [activeJobs, currentSession?.id])
+
+  // Get active jobs for current session
+  const currentSessionActiveJobs = Object.values(activeJobs).filter(
+    job => job && job.session_id === currentSession?.id && !['completed', 'failed'].includes(job.status)
+  )
 
   // Handle sidebar resize
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -191,20 +280,34 @@ export function VideoPage() {
     }
   }, [selectedModel])
 
-  const handleGenerate = () => {
-    // Show coming soon notification
-    setShowToast(true)
-    setTimeout(() => setShowToast(false), 4000)
+  const handleGenerate = async () => {
+    if (!prompt.trim() || isSubmitting || !currentSession) return
 
-    // Log the params for debugging
-    console.log('Video generation requested:', {
-      prompt: selectedStyleInfo.prefix + prompt.trim(),
+    setError(null)
+    setIsSubmitting(true)
+
+    const { width, height } = getDimensions(aspectRatio, resolution)
+    const fullPrompt = selectedStyleInfo.prefix + prompt.trim()
+
+    const request: VideoGenerateRequest = {
+      prompt: fullPrompt,
       model: selectedModel,
-      aspectRatio,
-      resolution,
-      startFrame,
-      endFrame,
-    })
+      width,
+      height,
+      session_id: currentSession.id,
+    }
+
+    try {
+      const response = await api.createVideoJob(request)
+      // Get the initial job state and add to activeJobs
+      const job = await api.getVideoJob(response.job_id)
+      setActiveJobs(prev => ({ ...prev, [job.id]: job }))
+      setPrompt('')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create video job')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -245,28 +348,6 @@ export function VideoPage() {
     }
     setEditingSessionId(null)
     setEditingName('')
-  }
-
-  const handleStartFrameUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        setStartFrame(reader.result as string)
-      }
-      reader.readAsDataURL(file)
-    }
-  }
-
-  const handleEndFrameUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        setEndFrame(reader.result as string)
-      }
-      reader.readAsDataURL(file)
-    }
   }
 
   return (
@@ -385,16 +466,106 @@ export function VideoPage() {
       <div className="flex-1 flex flex-col relative min-w-0 h-full">
         <div className="flex-1 overflow-y-auto pb-40 scrollbar-thin min-h-0">
           <div className="p-4 space-y-6">
-            {/* Empty state */}
-            <div className="text-center py-20">
-              <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-6">
-                <Sparkles className="h-10 w-10 text-white/20" />
+            {/* Error message */}
+            {error && (
+              <div className="max-w-2xl mx-auto p-4 rounded-xl bg-red-500/20 border border-red-500/30">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0" />
+                  <p className="text-sm text-red-200">{error}</p>
+                  <button
+                    onClick={() => setError(null)}
+                    className="ml-auto text-red-200/60 hover:text-red-200"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
-              <h2 className="text-xl font-medium text-white/80 mb-2">Create a video</h2>
-              <p className="text-white/40 max-w-md mx-auto">
-                Describe what you want to see and generate AI videos
-              </p>
-            </div>
+            )}
+
+            {/* Active jobs progress */}
+            {currentSessionActiveJobs.map((job) => (
+              <div key={job.id} className="max-w-2xl mx-auto p-6 rounded-xl glass">
+                <div className="flex items-center gap-4 mb-4">
+                  <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                  <div>
+                    <p className="text-white font-medium">Generating video...</p>
+                    <p className="text-sm text-white/60 capitalize">
+                      {job.status.replace('_', ' ')}
+                      {job.download_progress > 0 && job.status === 'downloading' && (
+                        <span> - {Math.round(job.download_progress)}%</span>
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-300"
+                    style={{ width: `${job.progress}%` }}
+                  />
+                </div>
+
+                {job.eta_seconds && job.eta_seconds > 0 && (
+                  <p className="text-xs text-white/40 mt-2">
+                    Estimated time: {Math.ceil(job.eta_seconds / 60)} min
+                  </p>
+                )}
+
+                <p className="text-xs text-white/40 mt-2 truncate">
+                  "{job.prompt}"
+                </p>
+              </div>
+            ))}
+
+            {/* Completed videos for this session */}
+            {completedJobs.length > 0 && (
+              <div className="max-w-4xl mx-auto space-y-6">
+                {completedJobs.map((job) => (
+                  job.video && (
+                    <div key={job.id} className="rounded-xl glass overflow-hidden">
+                      <div className="relative aspect-video bg-black">
+                        <video
+                          src={job.video.url}
+                          controls
+                          className="w-full h-full object-contain"
+                          poster={job.video.url.replace('.mp4', '_thumb.jpg')}
+                        />
+                      </div>
+                      <div className="p-4">
+                        <p className="text-sm text-white/80 mb-2 line-clamp-2">{job.prompt}</p>
+                        <div className="flex items-center justify-between text-xs text-white/40">
+                          <span>{job.video.width}x{job.video.height} • {job.video.duration.toFixed(1)}s • {job.video.fps}fps</span>
+                          <div className="flex items-center gap-2">
+                            <a
+                              href={job.video.url}
+                              download={job.video.filename}
+                              className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                              title="Download video"
+                            >
+                              <Download className="h-4 w-4" />
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                ))}
+              </div>
+            )}
+
+            {/* Empty state - only show when no videos and not generating */}
+            {completedJobs.length === 0 && currentSessionActiveJobs.length === 0 && (
+              <div className="text-center py-20">
+                <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-6">
+                  <Sparkles className="h-10 w-10 text-white/20" />
+                </div>
+                <h2 className="text-xl font-medium text-white/80 mb-2">Create a video</h2>
+                <p className="text-white/40 max-w-md mx-auto">
+                  Describe what you want to see and generate AI videos
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -405,78 +576,8 @@ export function VideoPage() {
         >
           <div className="max-w-3xl mx-auto">
             <div className="glass rounded-2xl p-3">
-              {/* Top row - Options */}
+              {/* Top row - Options (text-to-video) */}
               <div className="flex items-center gap-2 mb-3 px-1 flex-wrap">
-                {/* Start Frame */}
-                <input
-                  ref={startFrameInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleStartFrameUpload}
-                  className="hidden"
-                />
-                <button
-                  onClick={() => startFrameInputRef.current?.click()}
-                  className={cn(
-                    'model-pill',
-                    startFrame && 'bg-primary/20 text-primary'
-                  )}
-                >
-                  {startFrame ? (
-                    <>
-                      <img src={startFrame} alt="Start" className="h-4 w-4 rounded object-cover" />
-                      <span>Start frame</span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setStartFrame(null) }}
-                        className="hover:text-red-400"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <ImagePlus className="h-3.5 w-3.5" />
-                      <span>Start frame</span>
-                    </>
-                  )}
-                </button>
-
-                {/* End Frame */}
-                <input
-                  ref={endFrameInputRef}
-                  type="file"
-                  accept="image/*"
-                  onChange={handleEndFrameUpload}
-                  className="hidden"
-                />
-                <button
-                  onClick={() => endFrameInputRef.current?.click()}
-                  className={cn(
-                    'model-pill',
-                    endFrame && 'bg-primary/20 text-primary'
-                  )}
-                >
-                  {endFrame ? (
-                    <>
-                      <img src={endFrame} alt="End" className="h-4 w-4 rounded object-cover" />
-                      <span>End frame</span>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setEndFrame(null) }}
-                        className="hover:text-red-400"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <ImagePlus className="h-3.5 w-3.5" />
-                      <span>End frame</span>
-                    </>
-                  )}
-                </button>
-
-                <div className="h-5 w-px bg-white/10" />
-
                 {/* Model Selector */}
                 <div className="relative">
                   <button
@@ -564,42 +665,6 @@ export function VideoPage() {
 
                 <div className="h-5 w-px bg-white/10" />
 
-                {/* Resolution Selector */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowResolutionMenu(!showResolutionMenu)}
-                    className="model-pill"
-                  >
-                    <Monitor className="h-3.5 w-3.5" />
-                    <span>{resolution}</span>
-                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', showResolutionMenu && 'rotate-180')} />
-                  </button>
-
-                  {showResolutionMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowResolutionMenu(false)} />
-                      <div className="absolute bottom-full left-0 mb-2 w-32 py-1 rounded-xl glass-light shadow-xl z-50">
-                        {availableResolutions.map((res) => (
-                          <button
-                            key={res.value}
-                            onClick={() => {
-                              setResolution(res.value)
-                              setShowResolutionMenu(false)
-                            }}
-                            className={cn(
-                              'w-full px-3 py-2 text-left text-sm transition-colors',
-                              'hover:bg-white/10',
-                              resolution === res.value && 'text-primary'
-                            )}
-                          >
-                            {res.label}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-
                 {/* Aspect Ratio Selector */}
                 <div className="relative">
                   <button
@@ -638,6 +703,42 @@ export function VideoPage() {
                     </>
                   )}
                 </div>
+
+                {/* Resolution Selector */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowResolutionMenu(!showResolutionMenu)}
+                    className="model-pill"
+                  >
+                    <Monitor className="h-3.5 w-3.5" />
+                    <span>{resolution}</span>
+                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', showResolutionMenu && 'rotate-180')} />
+                  </button>
+
+                  {showResolutionMenu && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowResolutionMenu(false)} />
+                      <div className="absolute bottom-full left-0 mb-2 w-32 py-1 rounded-xl glass-light shadow-xl z-50">
+                        {availableResolutions.map((res) => (
+                          <button
+                            key={res.value}
+                            onClick={() => {
+                              setResolution(res.value)
+                              setShowResolutionMenu(false)
+                            }}
+                            className={cn(
+                              'w-full px-3 py-2 text-left text-sm transition-colors',
+                              'hover:bg-white/10',
+                              resolution === res.value && 'text-primary'
+                            )}
+                          >
+                            {res.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
 
               {/* Prompt input row */}
@@ -656,11 +757,20 @@ export function VideoPage() {
                 </div>
                 <button
                   onClick={handleGenerate}
-                  disabled={!prompt.trim()}
+                  disabled={!prompt.trim() || isSubmitting}
                   className="generate-btn flex items-center gap-2"
                 >
-                  <Sparkles className="h-4 w-4" />
-                  <span>Generate</span>
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span>Submitting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      <span>Generate</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -668,20 +778,6 @@ export function VideoPage() {
         </div>
       </div>
 
-      {/* Coming Soon Toast */}
-      {showToast && (
-        <div className="fixed bottom-32 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-amber-500/20 border border-amber-500/30 backdrop-blur-sm">
-            <AlertCircle className="h-5 w-5 text-amber-400 flex-shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-amber-200">Video Generation Coming Soon</p>
-              <p className="text-xs text-amber-200/60 mt-0.5">
-                Backend integration is in progress. Stay tuned!
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

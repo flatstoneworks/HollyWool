@@ -170,3 +170,69 @@ class CacheDeleteResponse(BaseModel):
     freed_mb: Optional[float] = None
     model_id: str
     error: Optional[str] = None
+
+
+# ============== Video Generation Schemas ==============
+
+class VideoGenerateRequest(BaseModel):
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    model: str = Field(default="cogvideox-5b")
+    negative_prompt: Optional[str] = Field(default=None, max_length=2000)
+    num_frames: Optional[int] = Field(default=None, ge=1, le=200)
+    fps: Optional[int] = Field(default=None, ge=1, le=60)
+    width: int = Field(default=720, ge=256, le=1920)
+    height: int = Field(default=480, ge=256, le=1080)
+    steps: Optional[int] = Field(default=None, ge=1, le=100)
+    guidance_scale: Optional[float] = Field(default=None, ge=0.0, le=20.0)
+    seed: Optional[int] = Field(default=None)
+    session_id: Optional[str] = Field(default=None)
+
+
+class VideoResult(BaseModel):
+    id: str
+    filename: str
+    url: str
+    seed: int
+    duration: float  # seconds
+    fps: int
+    num_frames: int
+    width: int
+    height: int
+
+
+class VideoJob(BaseModel):
+    id: str
+    session_id: Optional[str] = None
+    status: str = JobStatus.QUEUED
+    progress: float = 0.0  # 0-100
+    current_frame: int = 0
+    total_frames: int = 1
+    eta_seconds: Optional[float] = None
+    error: Optional[str] = None
+    # Download progress
+    download_progress: float = 0.0
+    download_total_mb: Optional[float] = None
+    download_speed_mbps: Optional[float] = None
+    # Request details
+    prompt: str
+    model: str
+    width: int
+    height: int
+    steps: int
+    num_frames: int
+    fps: int
+    # Result
+    video: Optional[VideoResult] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class VideoJobResponse(BaseModel):
+    job_id: str
+    status: str
+    message: str
+
+
+class VideoJobListResponse(BaseModel):
+    jobs: list[VideoJob]

@@ -154,6 +154,35 @@ models:
     size_gb: 6.9
     requires_approval: false
 
+  # === VIDEO GENERATION MODELS ===
+  cogvideox-5b:
+    name: "CogVideoX-5B"
+    path: "THUDM/CogVideoX-5b"
+    type: "video"
+    default_steps: 50
+    default_guidance: 6.0
+    default_num_frames: 49
+    default_fps: 8
+    category: "video"
+    description: "High-quality text-to-video generation, 6s clips at 720p"
+    tags: ["video", "text-to-video", "quality"]
+    size_gb: 12
+    requires_approval: false
+
+  cogvideox-2b:
+    name: "CogVideoX-2B"
+    path: "THUDM/CogVideoX-2b"
+    type: "video"
+    default_steps: 50
+    default_guidance: 6.0
+    default_num_frames: 49
+    default_fps: 8
+    category: "video"
+    description: "Faster, lighter video model for quick iterations"
+    tags: ["video", "text-to-video", "fast"]
+    size_gb: 6
+    requires_approval: false
+
 # Default generation settings
 defaults:
   width: 1024

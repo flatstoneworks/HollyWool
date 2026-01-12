@@ -975,45 +975,6 @@ export function ImagePage() {
             <div className="glass rounded-2xl p-3">
               {/* Top row - Options */}
               <div className="flex items-center gap-2 mb-3 px-1 flex-wrap">
-                {/* Style Selector */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowStyleMenu(!showStyleMenu)}
-                    className={cn(
-                      'model-pill',
-                      selectedStyle !== 'none' && 'bg-primary/20 text-primary'
-                    )}
-                  >
-                    <Palette className="h-3.5 w-3.5" />
-                    <span>{selectedStyleInfo.label}</span>
-                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', showStyleMenu && 'rotate-180')} />
-                  </button>
-
-                  {showStyleMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowStyleMenu(false)} />
-                      <div className="absolute bottom-full left-0 mb-2 w-48 py-1 rounded-xl glass-light shadow-xl z-50">
-                        {stylePresets.map((style) => (
-                          <button
-                            key={style.id}
-                            onClick={() => {
-                              setSelectedStyle(style.id)
-                              setShowStyleMenu(false)
-                            }}
-                            className={cn(
-                              'w-full px-3 py-2 text-left text-sm transition-colors',
-                              'hover:bg-white/10',
-                              selectedStyle === style.id && 'text-primary'
-                            )}
-                          >
-                            {style.label}
-                          </button>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </div>
-
                 {/* Model Selector */}
                 <div className="relative">
                   <button
@@ -1046,6 +1007,45 @@ export function ImagePage() {
                             <div className="text-xs text-white/40 mt-0.5">
                               {model.default_steps} steps
                             </div>
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Style Selector */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowStyleMenu(!showStyleMenu)}
+                    className={cn(
+                      'model-pill',
+                      selectedStyle !== 'none' && 'bg-primary/20 text-primary'
+                    )}
+                  >
+                    <Palette className="h-3.5 w-3.5" />
+                    <span>{selectedStyleInfo.label}</span>
+                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', showStyleMenu && 'rotate-180')} />
+                  </button>
+
+                  {showStyleMenu && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowStyleMenu(false)} />
+                      <div className="absolute bottom-full left-0 mb-2 w-48 py-1 rounded-xl glass-light shadow-xl z-50">
+                        {stylePresets.map((style) => (
+                          <button
+                            key={style.id}
+                            onClick={() => {
+                              setSelectedStyle(style.id)
+                              setShowStyleMenu(false)
+                            }}
+                            className={cn(
+                              'w-full px-3 py-2 text-left text-sm transition-colors',
+                              'hover:bg-white/10',
+                              selectedStyle === style.id && 'text-primary'
+                            )}
+                          >
+                            {style.label}
                           </button>
                         ))}
                       </div>

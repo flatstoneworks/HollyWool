@@ -10,7 +10,9 @@ from diffusers import (
     StableDiffusionPipeline,
     StableDiffusion3Pipeline,
     AutoPipelineForText2Image,
+    CogVideoXPipeline,
 )
+from diffusers.utils import export_to_video
 from huggingface_hub import snapshot_download, HfFileSystem
 from PIL import Image
 
@@ -188,6 +190,11 @@ class InferenceService:
                     torch_dtype=self.dtype,
                     use_safetensors=True,
                 )
+            elif model_type == "video":
+                new_pipeline = CogVideoXPipeline.from_pretrained(
+                    model_path,
+                    torch_dtype=self.dtype,
+                )
             else:
                 raise ValueError(f"Unknown model type: {model_type}")
         except Exception as e:
@@ -254,6 +261,65 @@ class InferenceService:
 
         image = self.pipeline(**gen_kwargs).images[0]
         return image, seed
+
+    def generate_video(
+        self,
+        prompt: str,
+        model_id: str,
+        negative_prompt: Optional[str] = None,
+        width: int = 720,
+        height: int = 480,
+        num_frames: Optional[int] = None,
+        fps: Optional[int] = None,
+        steps: Optional[int] = None,
+        guidance_scale: Optional[float] = None,
+        seed: Optional[int] = None,
+        output_path: Optional[str] = None,
+    ) -> tuple[str, int, int, int]:
+        """Generate a video and save it to output_path.
+
+        Returns: (output_path, seed, num_frames, fps)
+        """
+        self.load_model(model_id)
+
+        model_config = self.get_model_config(model_id)
+        if steps is None:
+            steps = model_config["default_steps"]
+        if guidance_scale is None:
+            guidance_scale = model_config["default_guidance"]
+        if num_frames is None:
+            num_frames = model_config.get("default_num_frames", 49)
+        if fps is None:
+            fps = model_config.get("default_fps", 8)
+        if seed is None:
+            seed = random.randint(0, 2**32 - 1)
+
+        generator = torch.Generator(device=self.device).manual_seed(seed)
+
+        print(f"Generating video: {num_frames} frames at {fps} fps")
+
+        # Build generation kwargs
+        gen_kwargs = {
+            "prompt": prompt,
+            "num_frames": num_frames,
+            "num_inference_steps": steps,
+            "guidance_scale": guidance_scale,
+            "generator": generator,
+        }
+
+        # CogVideoX specific settings
+        if negative_prompt:
+            gen_kwargs["negative_prompt"] = negative_prompt
+
+        # Generate video frames
+        video_frames = self.pipeline(**gen_kwargs).frames[0]
+
+        # Save video to file
+        if output_path:
+            export_to_video(video_frames, output_path, fps=fps)
+            print(f"Video saved to: {output_path}")
+
+        return output_path, seed, len(video_frames), fps
 
     def is_gpu_available(self) -> bool:
         return torch.cuda.is_available()

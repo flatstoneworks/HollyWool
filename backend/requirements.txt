@@ -1,7 +1,7 @@
 fastapi>=0.109.0
 uvicorn[standard]>=0.27.0
 python-multipart>=0.0.6
-diffusers>=0.27.0
+diffusers>=0.30.0
 transformers>=4.38.0
 accelerate>=0.27.0
 torch>=2.2.0
@@ -11,3 +11,4 @@ pydantic>=2.6.0
 pydantic-settings>=2.1.0
 pyyaml>=6.0.1
 aiofiles>=23.2.1
+imageio[ffmpeg]>=2.34.0
