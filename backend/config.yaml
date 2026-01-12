@@ -1,0 +1,169 @@
+# HollyWool Configuration
+
+# Output directory for generated images
+output_dir: "../outputs"
+
+# Available models - add your local model paths here
+models:
+  # === FAST MODELS (1-4 steps) ===
+  sd-turbo:
+    name: "SD Turbo"
+    path: "stabilityai/sd-turbo"
+    type: "sd"
+    default_steps: 1
+    default_guidance: 0.0
+    category: "fast"
+    description: "Ultra-fast 1-step generation, good for quick iterations and previews"
+    tags: ["fast", "general"]
+    size_gb: 3.5
+    requires_approval: false
+
+  sdxl-turbo:
+    name: "SDXL Turbo"
+    path: "stabilityai/sdxl-turbo"
+    type: "sd"
+    default_steps: 1
+    default_guidance: 0.0
+    category: "fast"
+    description: "Fast 1-step SDXL model, higher quality than SD Turbo"
+    tags: ["fast", "general", "high-res"]
+    size_gb: 6.9
+    requires_approval: false
+
+  sdxl-lightning:
+    name: "SDXL Lightning (4-step)"
+    path: "ByteDance/SDXL-Lightning"
+    type: "sdxl"
+    default_steps: 4
+    default_guidance: 0.0
+    category: "fast"
+    description: "ByteDance's 4-step distilled SDXL, great quality for speed"
+    tags: ["fast", "general", "high-res"]
+    size_gb: 6.5
+    requires_approval: false
+
+  flux-schnell:
+    name: "FLUX.1 Schnell"
+    path: "black-forest-labs/FLUX.1-schnell"
+    type: "flux"
+    default_steps: 4
+    default_guidance: 0.0
+    category: "fast"
+    description: "Fast FLUX model, excellent prompt following and text generation"
+    tags: ["fast", "text-in-image", "general"]
+    size_gb: 23
+    requires_approval: false
+
+  # === QUALITY MODELS (20-50 steps) ===
+  flux-dev:
+    name: "FLUX.1 Dev"
+    path: "black-forest-labs/FLUX.1-dev"
+    type: "flux"
+    default_steps: 28
+    default_guidance: 3.5
+    category: "quality"
+    description: "High-quality FLUX model, best-in-class prompt following and text rendering"
+    tags: ["quality", "text-in-image", "photorealistic", "artistic"]
+    size_gb: 23
+    requires_approval: true
+    approval_url: "https://huggingface.co/black-forest-labs/FLUX.1-dev"
+
+  sd3-medium:
+    name: "Stable Diffusion 3 Medium"
+    path: "stabilityai/stable-diffusion-3-medium-diffusers"
+    type: "sd3"
+    default_steps: 28
+    default_guidance: 7.0
+    category: "quality"
+    description: "Stability AI's SD3, excellent text rendering and composition"
+    tags: ["quality", "text-in-image", "general"]
+    size_gb: 7
+    requires_approval: true
+    approval_url: "https://huggingface.co/stabilityai/stable-diffusion-3-medium-diffusers"
+
+  sdxl-base:
+    name: "Stable Diffusion XL"
+    path: "stabilityai/stable-diffusion-xl-base-1.0"
+    type: "sdxl"
+    default_steps: 30
+    default_guidance: 7.5
+    category: "quality"
+    description: "The original SDXL base model, solid all-around performer"
+    tags: ["quality", "general", "high-res"]
+    size_gb: 6.9
+    requires_approval: false
+
+  playground-v25:
+    name: "Playground v2.5"
+    path: "playgroundai/playground-v2.5-1024px-aesthetic"
+    type: "sdxl"
+    default_steps: 30
+    default_guidance: 3.0
+    category: "quality"
+    description: "Aesthetic-focused model, great for artistic and stylized images"
+    tags: ["quality", "artistic", "aesthetic"]
+    size_gb: 6.9
+    requires_approval: false
+
+  # === SPECIALIZED MODELS ===
+  realvisxl:
+    name: "RealVisXL (Photorealistic)"
+    path: "SG161222/RealVisXL_V4.0"
+    type: "sdxl"
+    default_steps: 25
+    default_guidance: 5.0
+    category: "specialized"
+    description: "Highly photorealistic model, excellent for portraits and real-world scenes"
+    tags: ["photorealistic", "portraits", "quality"]
+    size_gb: 6.9
+    requires_approval: false
+
+  dreamshaper-xl:
+    name: "DreamShaper XL"
+    path: "Lykon/dreamshaper-xl-v2-turbo"
+    type: "sdxl"
+    default_steps: 6
+    default_guidance: 2.0
+    category: "specialized"
+    description: "Fast artistic model, great for fantasy and creative content"
+    tags: ["fast", "artistic", "fantasy"]
+    size_gb: 6.5
+    requires_approval: false
+
+  animagine-xl:
+    name: "Animagine XL 3.1 (Anime)"
+    path: "cagliostrolab/animagine-xl-3.1"
+    type: "sdxl"
+    default_steps: 28
+    default_guidance: 7.0
+    category: "specialized"
+    description: "Top anime/manga style model, supports character tags"
+    tags: ["anime", "illustration", "characters"]
+    size_gb: 7
+    requires_approval: false
+
+  juggernaut-xl:
+    name: "Juggernaut XL"
+    path: "RunDiffusion/Juggernaut-XL-v9"
+    type: "sdxl"
+    default_steps: 30
+    default_guidance: 6.0
+    category: "specialized"
+    description: "Versatile high-quality model, great for detailed scenes"
+    tags: ["quality", "photorealistic", "detailed"]
+    size_gb: 6.9
+    requires_approval: false
+
+# Default generation settings
+defaults:
+  width: 1024
+  height: 1024
+  model: "sd-turbo"
+
+# Server settings
+server:
+  host: "0.0.0.0"
+  port: 8000
+  cors_origins:
+    - "http://spark.local:5173"
+    - "http://localhost:5173"

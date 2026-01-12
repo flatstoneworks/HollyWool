@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Generated files
+outputs/
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.webm
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+*.log
+
+# HuggingFace cache (don't commit models)
+.cache/
+
+# Temporary files
+*.tmp
+*.temp
+
+# User data
+data/
