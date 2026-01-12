@@ -1,6 +1,8 @@
 # HollyWool
 
-A local AI image and video generation tool inspired by KREA. Generate high-quality images using state-of-the-art diffusion models running locally on your GPU.
+A local AI image and video generation tool inspired by the best online services. 
+Generate high-quality images using state-of-the-art diffusion models running locally on your GPU.
+This is meant to work optimally on the NVIDIA DGX Spark.
 
 ## Features
 
