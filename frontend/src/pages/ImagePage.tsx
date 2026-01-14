@@ -3,9 +3,9 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Loader2, Sparkles, ChevronDown, Wand2, Download, Copy,
   RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Palette,
-  Plus, Minus, MessageSquare, MoreHorizontal, Pencil, GripVertical, Square
+  Plus, Minus, MessageSquare, MoreHorizontal, Pencil, GripVertical, Square, Layers
 } from 'lucide-react'
-import { api, type ModelInfo, type Asset, type Job, groupAssetsByBatch } from '@/api/client'
+import { api, type ModelInfo, type Asset, type Job, type LoRAInfo, groupAssetsByBatch } from '@/api/client'
 import { cn } from '@/lib/utils'
 import {
   getSessions, createSession, setCurrentSessionId, getCurrentSessionId,
@@ -46,6 +46,11 @@ export function ImagePage() {
   const [showModelMenu, setShowModelMenu] = useState(false)
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [showAspectMenu, setShowAspectMenu] = useState(false)
+  const [showLoraMenu, setShowLoraMenu] = useState(false)
+
+  // LoRA state
+  const [selectedLoras, setSelectedLoras] = useState<{ id: string; name: string; weight: number }[]>([])
+  const [availableLoras, setAvailableLoras] = useState<LoRAInfo[]>([])
   const [lightboxImage, setLightboxImage] = useState<Asset | null>(null)
   const [hoveredImage, setHoveredImage] = useState<string | null>(null)
 
@@ -150,6 +155,27 @@ export function ImagePage() {
     queryKey: ['assets'],
     queryFn: () => api.getAssets({ limit: 200 }),
   })
+
+  // Get model type for current model
+  const selectedModelType = modelsData?.models.find(m => m.id === selectedModel)?.type || 'sd'
+
+  // Fetch available LoRAs when model changes
+  useEffect(() => {
+    const fetchLoras = async () => {
+      try {
+        const { loras } = await api.getLoras(selectedModelType)
+        setAvailableLoras(loras)
+        // Clear selected LoRAs that are no longer compatible
+        setSelectedLoras(prev =>
+          prev.filter(l => loras.some(al => al.id === l.id))
+        )
+      } catch (err) {
+        console.error('Failed to fetch LoRAs:', err)
+        setAvailableLoras([])
+      }
+    }
+    fetchLoras()
+  }, [selectedModelType])
 
   // Poll for active jobs from backend (supports multiple queued jobs)
   useEffect(() => {
@@ -281,6 +307,9 @@ export function ImagePage() {
         height: selectedAspect.height,
         num_images: imageCount,
         session_id: currentSession.id,
+        loras: selectedLoras.length > 0
+          ? selectedLoras.map(l => ({ lora_id: l.id, weight: l.weight }))
+          : undefined,
       })
 
       // Fetch the job details and track it by job ID
@@ -443,6 +472,9 @@ export function ImagePage() {
         height: asset.height,
         num_images: imageCount,
         session_id: currentSession.id,
+        loras: selectedLoras.length > 0
+          ? selectedLoras.map(l => ({ lora_id: l.id, weight: l.weight }))
+          : undefined,
       })
       const job = await api.getJob(response.job_id)
       setActiveJobs(prev => ({ ...prev, [job.id]: job }))
@@ -1048,6 +1080,121 @@ export function ImagePage() {
                             {style.label}
                           </button>
                         ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* LoRA Selector */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowLoraMenu(!showLoraMenu)}
+                    className={cn(
+                      'model-pill',
+                      selectedLoras.length > 0 && 'bg-primary/20 text-primary'
+                    )}
+                  >
+                    <Layers className="h-3.5 w-3.5" />
+                    <span>{selectedLoras.length > 0 ? `${selectedLoras.length} LoRA` : 'LoRAs'}</span>
+                    <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', showLoraMenu && 'rotate-180')} />
+                  </button>
+
+                  {showLoraMenu && (
+                    <>
+                      <div className="fixed inset-0 z-40" onClick={() => setShowLoraMenu(false)} />
+                      <div className="absolute bottom-full left-0 mb-2 w-80 py-2 rounded-xl glass-light shadow-xl z-50 max-h-96 overflow-y-auto">
+                        <div className="px-3 pb-2 border-b border-white/10">
+                          <h3 className="text-xs font-medium text-white/40 uppercase">Available LoRAs</h3>
+                        </div>
+
+                        {availableLoras.length === 0 ? (
+                          <div className="px-3 py-4 text-center text-sm text-white/40">
+                            No compatible LoRAs for this model
+                          </div>
+                        ) : (
+                          availableLoras.map((lora) => {
+                            const isSelected = selectedLoras.some(l => l.id === lora.id)
+                            const selectedLora = selectedLoras.find(l => l.id === lora.id)
+
+                            return (
+                              <div key={lora.id} className="px-3 py-2 hover:bg-white/5">
+                                <div className="flex items-center justify-between">
+                                  <label className="flex items-center gap-2 cursor-pointer flex-1">
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setSelectedLoras([...selectedLoras, {
+                                            id: lora.id,
+                                            name: lora.name,
+                                            weight: lora.default_weight
+                                          }])
+                                        } else {
+                                          setSelectedLoras(selectedLoras.filter(l => l.id !== lora.id))
+                                        }
+                                      }}
+                                      className="rounded border-white/20 bg-white/5 text-primary focus:ring-primary/50"
+                                    />
+                                    <div>
+                                      <div className="text-sm font-medium">{lora.name}</div>
+                                      {lora.description && (
+                                        <div className="text-xs text-white/40">{lora.description}</div>
+                                      )}
+                                    </div>
+                                  </label>
+                                  {!lora.is_downloaded && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
+                                      Download
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Weight slider when selected */}
+                                {isSelected && selectedLora && (
+                                  <div className="mt-2 pl-6">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs text-white/40 w-12">Weight:</span>
+                                      <input
+                                        type="range"
+                                        min="0"
+                                        max="1.5"
+                                        step="0.05"
+                                        value={selectedLora.weight}
+                                        onChange={(e) => {
+                                          setSelectedLoras(selectedLoras.map(l =>
+                                            l.id === lora.id ? { ...l, weight: parseFloat(e.target.value) } : l
+                                          ))
+                                        }}
+                                        className="flex-1 h-1 bg-white/10 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
+                                      />
+                                      <span className="text-xs text-white/60 w-8 text-right">
+                                        {selectedLora.weight.toFixed(2)}
+                                      </span>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })
+                        )}
+
+                        {/* Selected LoRAs summary */}
+                        {selectedLoras.length > 0 && (
+                          <div className="px-3 pt-2 mt-2 border-t border-white/10">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs text-white/40">
+                                {selectedLoras.length} selected
+                              </span>
+                              <button
+                                onClick={() => setSelectedLoras([])}
+                                className="text-xs text-red-400 hover:text-red-300"
+                              >
+                                Clear all
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </>
                   )}

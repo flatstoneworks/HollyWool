@@ -213,6 +213,53 @@ models:
     requires_approval: false
     fp8: true
 
+  # === IMAGE-TO-VIDEO MODELS ===
+  cogvideox-5b-i2v:
+    name: "CogVideoX-5B I2V"
+    path: "THUDM/CogVideoX-5b-I2V"
+    type: "video-i2v"
+    default_steps: 50
+    default_guidance: 6.0
+    default_num_frames: 49
+    default_fps: 8
+    category: "video"
+    description: "Animate still images into 6-second video clips"
+    tags: ["video", "image-to-video", "quality"]
+    size_gb: 12
+    requires_approval: false
+
+  svd-xt:
+    name: "Stable Video Diffusion XT"
+    path: "stabilityai/stable-video-diffusion-img2vid-xt"
+    type: "svd"
+    default_steps: 25
+    default_guidance: 3.0
+    default_num_frames: 25
+    default_fps: 7
+    category: "video"
+    description: "High-quality image animation with smooth motion"
+    tags: ["video", "image-to-video", "fast"]
+    size_gb: 9
+    requires_approval: false
+
+# LoRA configuration
+loras:
+  local_dir: "~/.hollywool/loras"
+  presets:
+    flux-realism:
+      name: "FLUX Realism"
+      path: "XLabs-AI/flux-RealismLora"
+      compatible_types: ["flux"]
+      default_weight: 0.8
+      description: "Enhances photorealism in FLUX models"
+
+    sdxl-detail:
+      name: "Detail Tweaker XL"
+      path: "ostris/ikea-instructions-lora-sdxl"
+      compatible_types: ["sdxl"]
+      default_weight: 0.7
+      description: "Adds fine details to SDXL generations"
+
 # Default generation settings
 defaults:
   width: 1024
@@ -222,7 +269,7 @@ defaults:
 # Server settings
 server:
   host: "0.0.0.0"
-  port: 8000
+  port: 8031
   cors_origins:
-    - "http://spark.local:5173"
-    - "http://localhost:5173"
+    - "http://spark.local:8030"
+    - "http://localhost:8030"

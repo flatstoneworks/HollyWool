@@ -5,7 +5,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { ImagePage } from './pages/ImagePage'
 import { VideoPage } from './pages/VideoPage'
-import { GalleryPage } from './pages/GalleryPage'
+import { AssetsPage } from './pages/AssetsPage'
 import { ModelsPage } from './pages/ModelsPage'
 import { JobDetailPage } from './pages/JobDetailPage'
 import { ModelDetailPage } from './pages/ModelDetailPage'
@@ -29,7 +29,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route index element={<Navigate to="/image" replace />} />
             <Route path="image" element={<ImagePage />} />
             <Route path="video" element={<VideoPage />} />
-            <Route path="gallery" element={<GalleryPage />} />
+            <Route path="assets" element={<AssetsPage />} />
             <Route path="models" element={<ModelsPage />} />
             <Route path="model/:modelId" element={<ModelDetailPage />} />
             <Route path="job/:jobId" element={<JobDetailPage />} />

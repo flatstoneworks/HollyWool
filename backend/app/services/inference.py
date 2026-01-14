@@ -11,6 +11,8 @@ from diffusers import (
     StableDiffusion3Pipeline,
     AutoPipelineForText2Image,
     CogVideoXPipeline,
+    CogVideoXImageToVideoPipeline,
+    StableVideoDiffusionPipeline,
 )
 from diffusers.utils import export_to_video
 
@@ -215,6 +217,17 @@ class InferenceService:
                     model_path,
                     torch_dtype=torch.bfloat16,
                 )
+            elif model_type == "video-i2v":
+                new_pipeline = CogVideoXImageToVideoPipeline.from_pretrained(
+                    model_path,
+                    torch_dtype=self.dtype,
+                )
+            elif model_type == "svd":
+                new_pipeline = StableVideoDiffusionPipeline.from_pretrained(
+                    model_path,
+                    torch_dtype=self.dtype,
+                    variant="fp16" if self.device == "cuda" else None,
+                )
             else:
                 raise ValueError(f"Unknown model type: {model_type}")
         except Exception as e:
@@ -247,16 +260,33 @@ class InferenceService:
         steps: Optional[int] = None,
         guidance_scale: Optional[float] = None,
         seed: Optional[int] = None,
+        loras: Optional[list] = None,
     ) -> tuple[Image.Image, int]:
         self.load_model(model_id)
 
         model_config = self.get_model_config(model_id)
+        model_type = model_config["type"]
+
         if steps is None:
             steps = model_config["default_steps"]
         if guidance_scale is None:
             guidance_scale = model_config["default_guidance"]
         if seed is None:
             seed = random.randint(0, 2**32 - 1)
+
+        # Apply LoRAs if provided and model supports them
+        if loras and model_type in ["flux", "sdxl", "sd", "sd3"]:
+            from .lora_manager import get_lora_manager
+            lora_manager = get_lora_manager()
+            lora_manager.apply_loras(self.pipeline, loras, model_type)
+        elif hasattr(self, '_loras_applied') and self._loras_applied:
+            # Clear LoRAs if none specified but were previously loaded
+            from .lora_manager import get_lora_manager
+            get_lora_manager()._unload_loras(self.pipeline)
+            self._loras_applied = False
+
+        if loras:
+            self._loras_applied = True
 
         generator = torch.Generator(device=self.device).manual_seed(seed)
 
@@ -269,7 +299,6 @@ class InferenceService:
             "generator": generator,
         }
 
-        model_type = model_config["type"]
         if model_type != "flux":
             gen_kwargs["guidance_scale"] = guidance_scale
             if negative_prompt:
@@ -394,6 +423,107 @@ class InferenceService:
                 print(f"Video saved to: {output_path}")
 
             return output_path, seed, len(video_frames), fps, None
+
+    def generate_video_from_image(
+        self,
+        image: Image.Image,
+        prompt: str,
+        model_id: str,
+        negative_prompt: Optional[str] = None,
+        width: int = 720,
+        height: int = 480,
+        num_frames: Optional[int] = None,
+        fps: Optional[int] = None,
+        steps: Optional[int] = None,
+        guidance_scale: Optional[float] = None,
+        seed: Optional[int] = None,
+        output_path: Optional[str] = None,
+        motion_bucket_id: int = 127,
+        noise_aug_strength: float = 0.02,
+    ) -> tuple[str, int, int, int, Optional[str]]:
+        """Generate a video from a source image (Image-to-Video).
+
+        Args:
+            image: Source PIL Image to animate.
+            prompt: Text prompt describing the desired animation.
+            model_id: ID of the I2V model to use.
+            negative_prompt: Optional negative prompt.
+            width: Output video width.
+            height: Output video height.
+            num_frames: Number of frames to generate.
+            fps: Frames per second for output video.
+            steps: Number of inference steps.
+            guidance_scale: Classifier-free guidance scale.
+            seed: Random seed for reproducibility.
+            output_path: Path to save the output video.
+            motion_bucket_id: SVD motion intensity (1-255).
+            noise_aug_strength: SVD noise augmentation strength.
+
+        Returns: (output_path, seed, num_frames, fps, audio_path)
+        """
+        self.load_model(model_id)
+
+        model_config = self.get_model_config(model_id)
+        model_type = model_config["type"]
+
+        if model_type not in ["video-i2v", "svd"]:
+            raise ValueError(f"Model {model_id} (type: {model_type}) does not support I2V")
+
+        # Set defaults from config
+        if steps is None:
+            steps = model_config["default_steps"]
+        if guidance_scale is None:
+            guidance_scale = model_config["default_guidance"]
+        if num_frames is None:
+            num_frames = model_config.get("default_num_frames", 49)
+        if fps is None:
+            fps = model_config.get("default_fps", 8)
+        if seed is None:
+            seed = random.randint(0, 2**32 - 1)
+
+        generator = torch.Generator(device=self.device).manual_seed(seed)
+
+        # Resize and prepare source image
+        image = image.convert("RGB").resize((width, height), Image.LANCZOS)
+
+        print(f"Generating I2V: {num_frames} frames at {fps} fps (model type: {model_type})")
+
+        if model_type == "video-i2v":
+            # CogVideoX Image-to-Video
+            gen_kwargs = {
+                "image": image,
+                "prompt": prompt,
+                "num_frames": num_frames,
+                "num_inference_steps": steps,
+                "guidance_scale": guidance_scale,
+                "generator": generator,
+            }
+
+            if negative_prompt:
+                gen_kwargs["negative_prompt"] = negative_prompt
+
+            video_frames = self.pipeline(**gen_kwargs).frames[0]
+
+        elif model_type == "svd":
+            # Stable Video Diffusion
+            gen_kwargs = {
+                "image": image,
+                "num_frames": num_frames,
+                "num_inference_steps": steps,
+                "motion_bucket_id": motion_bucket_id,
+                "noise_aug_strength": noise_aug_strength,
+                "generator": generator,
+                "decode_chunk_size": 8,
+            }
+
+            video_frames = self.pipeline(**gen_kwargs).frames[0]
+
+        # Save video to file
+        if output_path:
+            export_to_video(video_frames, output_path, fps=fps)
+            print(f"I2V video saved to: {output_path}")
+
+        return output_path, seed, len(video_frames), fps, None
 
     def is_gpu_available(self) -> bool:
         return torch.cuda.is_available()

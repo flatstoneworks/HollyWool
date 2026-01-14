@@ -266,9 +266,9 @@ npm run build
 ```
 
 ### Access
-- Frontend: http://spark.local:5173 (dev) or served by backend
-- Backend API: http://spark.local:8000
-- API Docs: http://spark.local:8000/docs
+- Frontend: http://spark.local:8030 (dev) or served by backend
+- Backend API: http://spark.local:8031
+- API Docs: http://spark.local:8031/docs
 
 ## Technology Stack
 

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Sparkles, ChevronDown, Palette, X, Wand2,
   Plus, MessageSquare, MoreHorizontal, Pencil, GripVertical, Trash2, Square, Monitor,
-  AlertCircle, Loader2, Download, Volume2
+  AlertCircle, Loader2, Download, Volume2, Upload, Image as ImageIcon
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -10,10 +10,11 @@ import {
   deleteVideoSession, renameVideoSession, ensureCurrentVideoSession, updateVideoSession,
   type VideoSession
 } from '@/lib/video-sessions'
-import { api, VideoJob, VideoGenerateRequest } from '@/api/client'
+import { api, VideoJob, VideoGenerateRequest, I2VJob, I2VGenerateRequest } from '@/api/client'
 
 type AspectRatio = '16:9' | '9:16' | '1:1'
 type Resolution = '720p' | '1080p'
+type VideoMode = 't2v' | 'i2v'
 
 // Video generation models
 interface VideoModel {
@@ -24,15 +25,18 @@ interface VideoModel {
   supportedResolutions: Resolution[]
   requiresApproval?: boolean
   approvalUrl?: string
+  mode: VideoMode  // t2v = text-to-video, i2v = image-to-video
 }
 
 const videoModels: VideoModel[] = [
+  // Text-to-Video models
   {
     id: 'ltx-2',
     name: 'LTX-2',
     description: 'High-quality video + audio, 5s at 24fps',
     maxDuration: 5,
     supportedResolutions: ['720p', '1080p'],
+    mode: 't2v',
   },
   {
     id: 'ltx-2-fp8',
@@ -40,6 +44,7 @@ const videoModels: VideoModel[] = [
     description: 'LTX-2 with lower memory usage',
     maxDuration: 5,
     supportedResolutions: ['720p', '1080p'],
+    mode: 't2v',
   },
   {
     id: 'cogvideox-5b',
@@ -47,6 +52,7 @@ const videoModels: VideoModel[] = [
     description: 'High-quality video generation, 6s clips',
     maxDuration: 6,
     supportedResolutions: ['720p'],
+    mode: 't2v',
   },
   {
     id: 'cogvideox-2b',
@@ -54,6 +60,24 @@ const videoModels: VideoModel[] = [
     description: 'Faster, lighter video model',
     maxDuration: 6,
     supportedResolutions: ['720p'],
+    mode: 't2v',
+  },
+  // Image-to-Video models
+  {
+    id: 'cogvideox-5b-i2v',
+    name: 'CogVideoX-5B I2V',
+    description: 'Animate images into video clips',
+    maxDuration: 6,
+    supportedResolutions: ['720p'],
+    mode: 'i2v',
+  },
+  {
+    id: 'svd-xt',
+    name: 'SVD XT',
+    description: 'Stable Video Diffusion, smooth motion',
+    maxDuration: 4,
+    supportedResolutions: ['720p', '1080p'],
+    mode: 'i2v',
   },
 ]
 
@@ -81,6 +105,7 @@ const DEFAULT_SIDEBAR_WIDTH = 256
 
 export function VideoPage() {
   const [prompt, setPrompt] = useState('')
+  const [mode, setMode] = useState<VideoMode>('t2v')
   const [selectedModel, setSelectedModel] = useState<string>('ltx-2')
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9')
   const [resolution, setResolution] = useState<Resolution>('720p')
@@ -89,6 +114,11 @@ export function VideoPage() {
   const [showStyleMenu, setShowStyleMenu] = useState(false)
   const [showAspectMenu, setShowAspectMenu] = useState(false)
   const [showResolutionMenu, setShowResolutionMenu] = useState(false)
+
+  // I2V state - source image
+  const [sourceImage, setSourceImage] = useState<File | null>(null)
+  const [sourceImagePreview, setSourceImagePreview] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Session management (video sessions are separate from image sessions)
   const [sessions, setSessions] = useState<VideoSession[]>([])
@@ -116,6 +146,12 @@ export function VideoPage() {
   const [activeJobs, setActiveJobs] = useState<Record<string, VideoJob>>({})
   const [completedJobs, setCompletedJobs] = useState<VideoJob[]>([])
   const [failedJobs, setFailedJobs] = useState<VideoJob[]>([])
+
+  // I2V job state
+  const [activeI2VJobs, setActiveI2VJobs] = useState<Record<string, I2VJob>>({})
+  const [completedI2VJobs, setCompletedI2VJobs] = useState<I2VJob[]>([])
+  const [failedI2VJobs, setFailedI2VJobs] = useState<I2VJob[]>([])
+
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -137,20 +173,33 @@ export function VideoPage() {
     }
   }
 
-  // Load jobs for current session (both active and completed)
+  // Load jobs for current session (both active and completed) + orphaned jobs
   useEffect(() => {
     if (!currentSession) return
 
     const loadSessionJobs = async () => {
       try {
-        const { jobs } = await api.getVideoJobs({ session_id: currentSession.id })
+        // Load jobs for current session
+        const { jobs: sessionJobs } = await api.getVideoJobs({ session_id: currentSession.id })
+
+        // Also load all jobs to find orphaned ones (no session_id)
+        const { jobs: allJobs } = await api.getVideoJobs({})
+        const orphanedJobs = allJobs.filter(j => !j.session_id)
+
+        // Combine session jobs and orphaned jobs
+        const jobs = [...sessionJobs, ...orphanedJobs]
+
+        // Deduplicate by job id
+        const uniqueJobs = jobs.filter((job, index, self) =>
+          index === self.findIndex(j => j.id === job.id)
+        )
 
         // Separate active, completed, and failed jobs
         const active: Record<string, VideoJob> = {}
         const completed: VideoJob[] = []
         const failed: VideoJob[] = []
 
-        for (const job of jobs) {
+        for (const job of uniqueJobs) {
           if (job.status === 'completed' && job.video) {
             completed.push(job)
           } else if (job.status === 'failed') {
@@ -235,6 +284,97 @@ export function VideoPage() {
     job => job && job.session_id === currentSession?.id && !['completed', 'failed'].includes(job.status)
   )
 
+  // Load I2V jobs for current session
+  useEffect(() => {
+    if (!currentSession) return
+
+    const loadI2VJobs = async () => {
+      try {
+        const { jobs } = await api.getI2VJobs({ session_id: currentSession.id })
+
+        const active: Record<string, I2VJob> = {}
+        const completed: I2VJob[] = []
+        const failed: I2VJob[] = []
+
+        for (const job of jobs) {
+          if (job.status === 'completed' && job.video) {
+            completed.push(job)
+          } else if (job.status === 'failed') {
+            failed.push(job)
+          } else if (!['completed', 'failed'].includes(job.status)) {
+            active[job.id] = job
+          }
+        }
+
+        completed.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        failed.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+        setActiveI2VJobs(active)
+        setCompletedI2VJobs(completed)
+        setFailedI2VJobs(failed)
+      } catch (err) {
+        console.error('Failed to load I2V jobs:', err)
+      }
+    }
+
+    loadI2VJobs()
+  }, [currentSession?.id])
+
+  // Poll for I2V job status updates
+  useEffect(() => {
+    const hasActiveI2VJobs = Object.values(activeI2VJobs).some(
+      job => job && !['completed', 'failed'].includes(job.status)
+    )
+
+    if (!hasActiveI2VJobs) return
+
+    const pollI2VJobs = async () => {
+      const jobIds = Object.keys(activeI2VJobs)
+
+      for (const jobId of jobIds) {
+        const job = activeI2VJobs[jobId]
+        if (!job || job.status === 'completed' || job.status === 'failed') continue
+
+        try {
+          const updatedJob = await api.getI2VJob(jobId)
+          setActiveI2VJobs(prev => ({ ...prev, [jobId]: updatedJob }))
+
+          if (updatedJob.status === 'completed' && updatedJob.session_id === currentSession?.id) {
+            setCompletedI2VJobs(prev => [updatedJob, ...prev.filter(j => j.id !== updatedJob.id)])
+            setActiveI2VJobs(prev => {
+              const next = { ...prev }
+              delete next[jobId]
+              return next
+            })
+            if (updatedJob.video?.url) {
+              updateVideoSession(updatedJob.session_id, { thumbnail: updatedJob.video.url })
+              setSessions(getVideoSessions())
+            }
+          } else if (updatedJob.status === 'failed') {
+            if (updatedJob.session_id === currentSession?.id) {
+              setFailedI2VJobs(prev => [updatedJob, ...prev.filter(j => j.id !== updatedJob.id)])
+            }
+            setActiveI2VJobs(prev => {
+              const next = { ...prev }
+              delete next[jobId]
+              return next
+            })
+          }
+        } catch (err) {
+          console.error('Failed to poll I2V job status:', err)
+        }
+      }
+    }
+
+    const interval = setInterval(pollI2VJobs, 1000)
+    return () => clearInterval(interval)
+  }, [activeI2VJobs, currentSession?.id])
+
+  // Get active I2V jobs for current session
+  const currentSessionActiveI2VJobs = Object.values(activeI2VJobs).filter(
+    job => job && job.session_id === currentSession?.id && !['completed', 'failed'].includes(job.status)
+  )
+
   // Handle sidebar resize
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -291,8 +431,54 @@ export function VideoPage() {
     }
   }, [selectedModel])
 
+  // Switch to first model of selected mode when mode changes
+  useEffect(() => {
+    const modelsForMode = videoModels.filter(m => m.mode === mode)
+    const firstModel = modelsForMode[0]
+    if (firstModel && !modelsForMode.some(m => m.id === selectedModel)) {
+      setSelectedModel(firstModel.id)
+    }
+  }, [mode])
+
+  // Handle file upload
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setSourceImage(file)
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setSourceImagePreview(reader.result as string)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const clearSourceImage = () => {
+    setSourceImage(null)
+    setSourceImagePreview(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  // Helper: file to base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+  }
+
   const handleGenerate = async () => {
     if (!prompt.trim() || isSubmitting || !currentSession) return
+
+    // For I2V mode, require an image
+    if (mode === 'i2v' && !sourceImage) {
+      setError('Please upload a source image for image-to-video generation')
+      return
+    }
 
     setError(null)
     setIsSubmitting(true)
@@ -300,20 +486,39 @@ export function VideoPage() {
     const { width, height } = getDimensions(aspectRatio, resolution)
     const fullPrompt = selectedStyleInfo.prefix + prompt.trim()
 
-    const request: VideoGenerateRequest = {
-      prompt: fullPrompt,
-      model: selectedModel,
-      width,
-      height,
-      session_id: currentSession.id,
-    }
-
     try {
-      const response = await api.createVideoJob(request)
-      // Get the initial job state and add to activeJobs
-      const job = await api.getVideoJob(response.job_id)
-      setActiveJobs(prev => ({ ...prev, [job.id]: job }))
-      setPrompt('')
+      if (mode === 'i2v' && sourceImage) {
+        // I2V generation
+        const imageBase64 = await fileToBase64(sourceImage)
+        const request: I2VGenerateRequest = {
+          prompt: fullPrompt,
+          model: selectedModel,
+          image_base64: imageBase64,
+          width,
+          height,
+          session_id: currentSession.id,
+        }
+
+        const response = await api.createI2VJob(request)
+        const job = await api.getI2VJob(response.job_id)
+        setActiveI2VJobs(prev => ({ ...prev, [job.id]: job }))
+        setPrompt('')
+        clearSourceImage()
+      } else {
+        // T2V generation
+        const request: VideoGenerateRequest = {
+          prompt: fullPrompt,
+          model: selectedModel,
+          width,
+          height,
+          session_id: currentSession.id,
+        }
+
+        const response = await api.createVideoJob(request)
+        const job = await api.getVideoJob(response.job_id)
+        setActiveJobs(prev => ({ ...prev, [job.id]: job }))
+        setPrompt('')
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create video job')
     } finally {
@@ -493,7 +698,7 @@ export function VideoPage() {
               </div>
             )}
 
-            {/* Active jobs progress */}
+            {/* Active T2V jobs progress */}
             {currentSessionActiveJobs.map((job) => (
               <div key={job.id} className="max-w-2xl mx-auto p-6 rounded-xl glass">
                 <div className="flex items-center gap-4 mb-4">
@@ -507,6 +712,49 @@ export function VideoPage() {
                       )}
                     </p>
                   </div>
+                </div>
+
+                {/* Progress bar */}
+                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-300"
+                    style={{ width: `${job.progress}%` }}
+                  />
+                </div>
+
+                {job.eta_seconds && job.eta_seconds > 0 && (
+                  <p className="text-xs text-white/40 mt-2">
+                    Estimated time: {Math.ceil(job.eta_seconds / 60)} min
+                  </p>
+                )}
+
+                <p className="text-xs text-white/40 mt-2 truncate">
+                  "{job.prompt}"
+                </p>
+              </div>
+            ))}
+
+            {/* Active I2V jobs progress */}
+            {currentSessionActiveI2VJobs.map((job) => (
+              <div key={job.id} className="max-w-2xl mx-auto p-6 rounded-xl glass">
+                <div className="flex items-center gap-4 mb-4">
+                  <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                  <div className="flex-1">
+                    <p className="text-white font-medium">Animating image...</p>
+                    <p className="text-sm text-white/60 capitalize">
+                      {job.status.replace('_', ' ')}
+                      {job.download_progress && job.download_progress > 0 && job.status === 'downloading' && (
+                        <span> - {Math.round(job.download_progress)}%</span>
+                      )}
+                    </p>
+                  </div>
+                  {job.source_image_url && (
+                    <img
+                      src={job.source_image_url}
+                      alt="Source"
+                      className="h-16 w-auto rounded-lg object-cover"
+                    />
+                  )}
                 </div>
 
                 {/* Progress bar */}
@@ -572,7 +820,57 @@ export function VideoPage() {
               </div>
             )}
 
-            {/* Failed jobs for this session */}
+            {/* Completed I2V videos */}
+            {completedI2VJobs.length > 0 && (
+              <div className="max-w-4xl mx-auto space-y-6">
+                {completedI2VJobs.map((job) => (
+                  job.video && (
+                    <div key={job.id} className="rounded-xl glass overflow-hidden">
+                      <div className="flex items-start gap-4 p-4 border-b border-white/5">
+                        {job.source_image_url && (
+                          <div className="flex-shrink-0">
+                            <p className="text-[10px] text-white/40 mb-1">Source</p>
+                            <img
+                              src={job.source_image_url}
+                              alt="Source"
+                              className="h-16 w-auto rounded-lg object-cover"
+                            />
+                          </div>
+                        )}
+                        <div className="flex items-center flex-1">
+                          <ImageIcon className="h-4 w-4 text-white/40 mr-2" />
+                          <span className="text-xs text-white/40">Image to Video</span>
+                        </div>
+                      </div>
+                      <div className="relative aspect-video bg-black">
+                        <video
+                          src={job.video.url}
+                          controls
+                          className="w-full h-full object-contain"
+                          poster={job.video.url.replace('.mp4', '_thumb.jpg')}
+                        />
+                      </div>
+                      <div className="p-4">
+                        <p className="text-sm text-white/80 mb-2 line-clamp-2">{job.prompt}</p>
+                        <div className="flex items-center justify-between text-xs text-white/40">
+                          <span>{job.video.width}x{job.video.height} • {job.video.duration.toFixed(1)}s • {job.video.fps}fps</span>
+                          <a
+                            href={job.video.url}
+                            download={job.video.filename}
+                            className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                            title="Download video"
+                          >
+                            <Download className="h-4 w-4" />
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                ))}
+              </div>
+            )}
+
+            {/* Failed T2V jobs */}
             {failedJobs.length > 0 && (
               <div className="max-w-2xl mx-auto space-y-4">
                 {failedJobs.map((job) => (
@@ -599,8 +897,37 @@ export function VideoPage() {
               </div>
             )}
 
+            {/* Failed I2V jobs */}
+            {failedI2VJobs.length > 0 && (
+              <div className="max-w-2xl mx-auto space-y-4">
+                {failedI2VJobs.map((job) => (
+                  <div key={job.id} className="p-4 rounded-xl bg-red-500/10 border border-red-500/20">
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-red-300">I2V generation failed</p>
+                        <p className="text-xs text-white/60 mt-1 truncate">"{job.prompt}"</p>
+                        {job.error && (
+                          <p className="text-xs text-red-300/80 mt-2 line-clamp-3">{job.error}</p>
+                        )}
+                      </div>
+                      <button
+                        onClick={() => setFailedI2VJobs(prev => prev.filter(j => j.id !== job.id))}
+                        className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                        title="Dismiss"
+                      >
+                        <X className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Empty state - only show when no videos and not generating */}
-            {completedJobs.length === 0 && currentSessionActiveJobs.length === 0 && failedJobs.length === 0 && (
+            {completedJobs.length === 0 && completedI2VJobs.length === 0 &&
+             currentSessionActiveJobs.length === 0 && currentSessionActiveI2VJobs.length === 0 &&
+             failedJobs.length === 0 && failedI2VJobs.length === 0 && (
               <div className="text-center py-20">
                 <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-6">
                   <Sparkles className="h-10 w-10 text-white/20" />
@@ -621,7 +948,35 @@ export function VideoPage() {
         >
           <div className="max-w-3xl mx-auto">
             <div className="glass rounded-2xl p-3">
-              {/* Top row - Options (text-to-video) */}
+              {/* Mode Toggle */}
+              <div className="flex items-center justify-center mb-3">
+                <div className="flex bg-white/5 rounded-full p-0.5">
+                  <button
+                    onClick={() => setMode('t2v')}
+                    className={cn(
+                      'px-4 py-1.5 rounded-full text-sm font-medium transition-all',
+                      mode === 't2v'
+                        ? 'bg-primary text-white'
+                        : 'text-white/60 hover:text-white'
+                    )}
+                  >
+                    Text to Video
+                  </button>
+                  <button
+                    onClick={() => setMode('i2v')}
+                    className={cn(
+                      'px-4 py-1.5 rounded-full text-sm font-medium transition-all',
+                      mode === 'i2v'
+                        ? 'bg-primary text-white'
+                        : 'text-white/60 hover:text-white'
+                    )}
+                  >
+                    Image to Video
+                  </button>
+                </div>
+              </div>
+
+              {/* Top row - Options */}
               <div className="flex items-center gap-2 mb-3 px-1 flex-wrap">
                 {/* Model Selector */}
                 <div className="relative">
@@ -642,7 +997,7 @@ export function VideoPage() {
                     <>
                       <div className="fixed inset-0 z-40" onClick={closeAllMenus} />
                       <div className="absolute bottom-full left-0 mb-2 w-64 py-1 rounded-xl glass-light shadow-xl z-50">
-                        {videoModels.map((model) => (
+                        {videoModels.filter(m => m.mode === mode).map((model) => (
                           <button
                             key={model.id}
                             onClick={() => {
@@ -802,12 +1157,56 @@ export function VideoPage() {
                 </div>
               </div>
 
+              {/* Image upload area - I2V mode only */}
+              {mode === 'i2v' && (
+                <div className="mb-3 px-1">
+                  {sourceImagePreview ? (
+                    <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5">
+                      <div className="relative">
+                        <img
+                          src={sourceImagePreview}
+                          alt="Source"
+                          className="h-20 w-auto rounded-lg object-cover"
+                        />
+                        <button
+                          onClick={clearSourceImage}
+                          className="absolute -top-2 -right-2 p-1 rounded-full bg-red-500 hover:bg-red-600 transition-colors"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm text-white/80">Source image ready</p>
+                        <p className="text-xs text-white/40 mt-1">This image will be animated</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="w-full p-4 rounded-xl border-2 border-dashed border-white/20 hover:border-primary/50 transition-colors flex items-center justify-center gap-3 text-white/60 hover:text-white"
+                    >
+                      <Upload className="h-5 w-5" />
+                      <span>Upload source image to animate</span>
+                    </button>
+                  )}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </div>
+              )}
+
               {/* Prompt input row */}
               <div className="flex items-end gap-3">
                 <div className="flex-1 bg-white/5 rounded-xl px-4 py-3">
                   <textarea
                     ref={textareaRef}
-                    placeholder="Describe a video and click generate..."
+                    placeholder={mode === 'i2v'
+                      ? "Describe how the image should animate..."
+                      : "Describe a video and click generate..."}
                     value={prompt}
                     onChange={(e) => setPrompt(e.target.value)}
                     onKeyDown={handleKeyDown}
@@ -818,7 +1217,7 @@ export function VideoPage() {
                 </div>
                 <button
                   onClick={handleGenerate}
-                  disabled={!prompt.trim() || isSubmitting}
+                  disabled={!prompt.trim() || isSubmitting || (mode === 'i2v' && !sourceImage)}
                   className="generate-btn flex items-center gap-2"
                 >
                   {isSubmitting ? (

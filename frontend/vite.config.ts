@@ -10,16 +10,16 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    port: 8030,
     host: '0.0.0.0',
     allowedHosts: ['spark.local'],
     proxy: {
       '/api': {
-        target: 'http://localhost:5171',
+        target: 'http://localhost:8031',
         changeOrigin: true,
       },
       '/outputs': {
-        target: 'http://localhost:5171',
+        target: 'http://localhost:8031',
         changeOrigin: true,
       },
     },

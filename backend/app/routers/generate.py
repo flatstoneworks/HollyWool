@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 
 from ..models.schemas import (
@@ -14,6 +14,8 @@ from ..models.schemas import (
     ModelsDetailedResponse, CacheStatusResponse, CacheDeleteResponse,
     VideoGenerateRequest, VideoJob, VideoJobResponse, VideoJobListResponse,
     SystemResourceStatus, ResourceCheckResponse,
+    LoRAListResponse, LoRAScanResponse,
+    I2VGenerateRequest, I2VJob, I2VJobResponse, I2VJobListResponse,
 )
 
 
@@ -76,6 +78,8 @@ def generate_title_from_prompt(prompt: str) -> str:
 from ..services.inference import get_inference_service
 from ..services.jobs import get_job_manager
 from ..services.video_jobs import get_video_job_manager
+from ..services.i2v_jobs import get_i2v_job_manager
+from ..services.lora_manager import get_lora_manager
 from ..services.resources import check_resources_for_video, get_system_resources
 
 router = APIRouter(prefix="/api", tags=["generate"])
@@ -143,6 +147,31 @@ async def delete_model_cache(model_id: str):
     return CacheDeleteResponse(**result)
 
 
+@router.post("/models/{model_id}/download")
+async def download_model(model_id: str, background_tasks: BackgroundTasks):
+    """Pre-download a model to cache without loading it into memory."""
+    service = get_inference_service()
+
+    # Check if model exists in config
+    model_config = service.get_model_config(model_id)
+    if not model_config:
+        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+
+    # Check if already cached
+    if service.is_model_cached(model_id):
+        return {"status": "already_cached", "model_id": model_id}
+
+    # Start background download
+    def do_download():
+        try:
+            service.download_model(model_id)
+        except Exception as e:
+            print(f"Error downloading model {model_id}: {e}")
+
+    background_tasks.add_task(do_download)
+    return {"status": "downloading", "model_id": model_id}
+
+
 @router.post("/generate-title", response_model=TitleResponse)
 async def generate_title(request: TitleRequest):
     """Generate a short title from a prompt for session naming."""
@@ -187,6 +216,7 @@ async def generate_images(request: GenerateRequest):
                 steps=request.steps,
                 guidance_scale=request.guidance_scale,
                 seed=image_seed,
+                loras=request.loras,
             )
 
             # Save image and metadata
@@ -211,6 +241,7 @@ async def generate_images(request: GenerateRequest):
                 "seed": actual_seed,
                 "batch_id": batch_id,
                 "created_at": created_at.isoformat(),
+                "loras": [{"lora_id": l.lora_id, "weight": l.weight} for l in request.loras] if request.loras else None,
             }
 
             with open(metadata_path, "w") as f:
@@ -421,3 +452,109 @@ async def check_can_generate(model_id: str):
         ),
         recommended_models=recommended,
     )
+
+
+# ============== LoRA Endpoints ==============
+
+@router.get("/loras", response_model=LoRAListResponse)
+async def list_loras(model_type: str = None):
+    """List available LoRAs, optionally filtered by compatible model type."""
+    lora_manager = get_lora_manager()
+    loras = lora_manager.get_available_loras(model_type)
+    return LoRAListResponse(
+        loras=loras,
+        local_lora_dir=str(lora_manager.local_dir),
+    )
+
+
+@router.post("/loras/scan", response_model=LoRAScanResponse)
+async def scan_local_loras():
+    """Rescan local LoRA directory for new files."""
+    lora_manager = get_lora_manager()
+    local_loras = lora_manager.scan_local_loras()
+    return LoRAScanResponse(
+        count=len(local_loras),
+        loras=local_loras,
+    )
+
+
+# ============== Image-to-Video (I2V) Endpoints ==============
+
+@router.post("/i2v/jobs", response_model=I2VJobResponse)
+async def create_i2v_job(request: I2VGenerateRequest):
+    """Create a new image-to-video generation job. Returns immediately with job_id."""
+    service = get_inference_service()
+
+    # Validate model exists and is an I2V model
+    model_config = service.get_model_config(request.model)
+    if not model_config:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {request.model}")
+
+    if model_config.get("type") not in ["video-i2v", "svd"]:
+        raise HTTPException(status_code=400, detail=f"Model {request.model} does not support I2V")
+
+    # Validate image source is provided
+    if not request.image_base64 and not request.image_asset_id:
+        raise HTTPException(status_code=400, detail="Must provide image_base64 or image_asset_id")
+
+    # Check system resources before accepting job
+    model_size_gb = model_config.get("size_gb", 12)
+    model_name = model_config.get("name", request.model)
+    resource_status = check_resources_for_video(model_size_gb, model_name)
+
+    if not resource_status.is_available:
+        raise HTTPException(
+            status_code=507,
+            detail={
+                "error": "insufficient_resources",
+                "message": resource_status.rejection_reason,
+                "resources": {
+                    "memory_available_gb": round(resource_status.memory_available_gb, 1),
+                    "memory_required_gb": round(model_size_gb + 5.0 + 10.0, 1),
+                    "gpu_utilization": resource_status.gpu_utilization,
+                    "cpu_percent": round(resource_status.cpu_percent, 1),
+                }
+            }
+        )
+
+    try:
+        i2v_job_manager = get_i2v_job_manager()
+        job = i2v_job_manager.create_job(request)
+
+        return I2VJobResponse(
+            job_id=job.id,
+            status=job.status,
+            message=f"I2V job queued. Estimated time: {int(job.eta_seconds or 0)}s"
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/i2v/jobs/{job_id}", response_model=I2VJob)
+async def get_i2v_job(job_id: str):
+    """Get the status of a specific I2V job."""
+    i2v_job_manager = get_i2v_job_manager()
+    job = i2v_job_manager.get_job(job_id)
+
+    if not job:
+        raise HTTPException(status_code=404, detail="I2V job not found")
+
+    return job
+
+
+@router.get("/i2v/jobs", response_model=I2VJobListResponse)
+async def list_i2v_jobs(session_id: str = None, active_only: bool = False):
+    """List I2V jobs, optionally filtered by session or active status."""
+    i2v_job_manager = get_i2v_job_manager()
+
+    if session_id:
+        jobs = i2v_job_manager.get_jobs_by_session(session_id)
+    elif active_only:
+        jobs = i2v_job_manager.get_active_jobs()
+    else:
+        jobs = list(i2v_job_manager.jobs.values())
+
+    # Sort by created_at descending
+    jobs = sorted(jobs, key=lambda j: j.created_at, reverse=True)
+
+    return I2VJobListResponse(jobs=jobs)

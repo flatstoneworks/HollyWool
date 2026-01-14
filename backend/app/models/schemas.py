@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Literal
 from datetime import datetime
 
 
@@ -9,6 +9,38 @@ class ModelInfo(BaseModel):
     type: str
     default_steps: int
     default_guidance: float
+
+
+# ============== LoRA Schemas ==============
+
+class LoRAApply(BaseModel):
+    """Request to apply a LoRA with a specific weight."""
+    lora_id: str
+    weight: float = Field(default=0.8, ge=0.0, le=1.5)
+
+
+class LoRAInfo(BaseModel):
+    """Information about an available LoRA."""
+    id: str
+    name: str
+    path: str
+    source: Literal["preset", "local", "huggingface"]
+    compatible_types: list[str]
+    default_weight: float = 0.8
+    description: str = ""
+    is_downloaded: bool = False
+
+
+class LoRAListResponse(BaseModel):
+    """Response for listing available LoRAs."""
+    loras: list[LoRAInfo]
+    local_lora_dir: str
+
+
+class LoRAScanResponse(BaseModel):
+    """Response for scanning local LoRA directory."""
+    count: int
+    loras: list[LoRAInfo]
 
 
 class GenerateRequest(BaseModel):
@@ -23,6 +55,7 @@ class GenerateRequest(BaseModel):
     num_images: int = Field(default=4, ge=1, le=4)
     batch_id: Optional[str] = Field(default=None)  # Groups images from same generation
     session_id: Optional[str] = Field(default=None)  # Link generation to session
+    loras: Optional[list[LoRAApply]] = Field(default=None)  # LoRAs to apply with weights
 
 
 class ImageResult(BaseModel):
@@ -282,3 +315,67 @@ class ResourceCheckResponse(BaseModel):
     can_generate: bool
     status: SystemResourceStatus
     recommended_models: list[str] = []  # Models that fit in available memory
+
+
+# ============== Image-to-Video (I2V) Schemas ==============
+
+class I2VGenerateRequest(BaseModel):
+    """Request for image-to-video generation."""
+    prompt: str = Field(..., min_length=1, max_length=2000)
+    model: str = Field(default="cogvideox-5b-i2v")
+    image_base64: Optional[str] = Field(default=None)  # Direct base64 image upload
+    image_asset_id: Optional[str] = Field(default=None)  # Use existing asset as source
+    negative_prompt: Optional[str] = Field(default=None, max_length=2000)
+    num_frames: Optional[int] = Field(default=None, ge=1, le=200)
+    fps: Optional[int] = Field(default=None, ge=1, le=60)
+    width: int = Field(default=720, ge=256, le=1920)
+    height: int = Field(default=480, ge=256, le=1080)
+    steps: Optional[int] = Field(default=None, ge=1, le=100)
+    guidance_scale: Optional[float] = Field(default=None, ge=0.0, le=20.0)
+    seed: Optional[int] = Field(default=None)
+    session_id: Optional[str] = Field(default=None)
+    # SVD-specific parameters
+    motion_bucket_id: int = Field(default=127, ge=1, le=255)
+    noise_aug_strength: float = Field(default=0.02, ge=0.0, le=1.0)
+
+
+class I2VJob(BaseModel):
+    """Image-to-video generation job status."""
+    id: str
+    session_id: Optional[str] = None
+    status: str = JobStatus.QUEUED
+    progress: float = 0.0
+    current_frame: int = 0
+    total_frames: int = 1
+    eta_seconds: Optional[float] = None
+    error: Optional[str] = None
+    # Download progress
+    download_progress: float = 0.0
+    download_total_mb: Optional[float] = None
+    download_speed_mbps: Optional[float] = None
+    # Request details
+    prompt: str
+    model: str
+    source_image_url: str  # URL/path of the source image
+    width: int
+    height: int
+    steps: int
+    num_frames: int
+    fps: int
+    # Result
+    video: Optional[VideoResult] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class I2VJobResponse(BaseModel):
+    """Response when creating an I2V job."""
+    job_id: str
+    status: str
+    message: str
+
+
+class I2VJobListResponse(BaseModel):
+    """Response listing I2V jobs."""
+    jobs: list[I2VJob]

@@ -44,7 +44,7 @@ export function Layout() {
             <span>Video</span>
           </NavLink>
           <NavLink
-            to="/gallery"
+            to="/assets"
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-1.5 px-4 py-1.5 rounded-full text-sm font-medium transition-all',
@@ -55,7 +55,7 @@ export function Layout() {
             }
           >
             <Images className="h-4 w-4" />
-            <span>Gallery</span>
+            <span>Assets</span>
           </NavLink>
           <NavLink
             to="/models"

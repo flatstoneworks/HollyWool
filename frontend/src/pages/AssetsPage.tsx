@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import {
   Loader2, Trash2, Copy, X, ChevronLeft, ChevronRight,
   Search, Home, Wand2, ChevronDown, ChevronUp, Download,
@@ -9,15 +10,15 @@ import { api, type Asset, type VideoAsset } from '@/api/client'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
-type MediaType = 'images' | 'videos'
+type MediaType = 'all' | 'images' | 'videos'
 
 const MIN_SIDEBAR_WIDTH = 200
 const MAX_SIDEBAR_WIDTH = 350
 const DEFAULT_SIDEBAR_WIDTH = 256
 
-export function GalleryPage() {
+export function AssetsPage() {
   const queryClient = useQueryClient()
-  const [mediaType, setMediaType] = useState<MediaType>('images')
+  const [mediaType, setMediaType] = useState<MediaType>('all')
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null)
   const [selectedVideoAsset, setSelectedVideoAsset] = useState<VideoAsset | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
@@ -42,7 +43,7 @@ export function GalleryPage() {
   })
 
   const data = mediaType === 'images' ? imageData : undefined
-  const isLoading = mediaType === 'images' ? isLoadingImages : isLoadingVideos
+  const isLoading = isLoadingImages || isLoadingVideos
 
   const deleteImageMutation = useMutation({
     mutationFn: api.deleteAsset,
@@ -110,39 +111,6 @@ export function GalleryPage() {
     document.body.removeChild(a)
   }
 
-  const navigateAsset = (direction: 'prev' | 'next') => {
-    if (!selectedAsset || !data?.assets) return
-    const currentIndex = data.assets.findIndex((a) => a.id === selectedAsset.id)
-    if (currentIndex === -1) return
-
-    const newIndex = direction === 'prev'
-      ? (currentIndex - 1 + data.assets.length) % data.assets.length
-      : (currentIndex + 1) % data.assets.length
-
-    setSelectedAsset(data.assets[newIndex] ?? null)
-  }
-
-  // Keyboard navigation for lightbox
-  useEffect(() => {
-    if (!selectedAsset) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault()
-        navigateAsset('prev')
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault()
-        navigateAsset('next')
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        setSelectedAsset(null)
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [selectedAsset, data?.assets])
-
   // Compute model counts and filtered assets for images
   const { modelCounts, filteredAssets } = useMemo(() => {
     const assets = imageData?.assets || []
@@ -169,6 +137,13 @@ export function GalleryPage() {
         a.model.toLowerCase().includes(query)
       )
     }
+
+    // Sort by created_at descending (latest first), handle missing dates
+    filtered.sort((a, b) => {
+      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0
+      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0
+      return dateB - dateA
+    })
 
     return { modelCounts: counts, filteredAssets: filtered }
   }, [imageData?.assets, selectedFilter, searchQuery])
@@ -200,13 +175,55 @@ export function GalleryPage() {
       )
     }
 
+    // Sort by created_at descending (latest first), handle missing dates
+    filtered.sort((a, b) => {
+      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0
+      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0
+      return dateB - dateA
+    })
+
     return { videoModelCounts: counts, filteredVideoAssets: filtered }
   }, [videoData?.assets, selectedFilter, searchQuery])
 
+  // Combined and sorted array for "All" view - interleaves images and videos by date
+  type CombinedAsset =
+    | { type: 'image'; asset: Asset }
+    | { type: 'video'; asset: VideoAsset }
+
+  const combinedAssets = useMemo<CombinedAsset[]>(() => {
+    const images: CombinedAsset[] = filteredAssets.map(asset => ({ type: 'image' as const, asset }))
+    const videos: CombinedAsset[] = filteredVideoAssets.map(asset => ({ type: 'video' as const, asset }))
+    const combined = [...images, ...videos]
+
+    // Sort by created_at descending
+    combined.sort((a, b) => {
+      const dateA = a.asset.created_at ? new Date(a.asset.created_at).getTime() : 0
+      const dateB = b.asset.created_at ? new Date(b.asset.created_at).getTime() : 0
+      return dateB - dateA
+    })
+
+    return combined
+  }, [filteredAssets, filteredVideoAssets])
+
   // Use correct data based on media type
-  const currentModelCounts = mediaType === 'images' ? modelCounts : videoModelCounts
+  const currentModelCounts = useMemo(() => {
+    if (mediaType === 'all') {
+      // Combine counts from both images and videos
+      const combined: Record<string, number> = { ...modelCounts }
+      for (const [model, count] of Object.entries(videoModelCounts)) {
+        combined[model] = (combined[model] || 0) + count
+      }
+      return combined
+    }
+    return mediaType === 'images' ? modelCounts : videoModelCounts
+  }, [mediaType, modelCounts, videoModelCounts])
+
   const currentAssets = mediaType === 'images' ? filteredAssets : filteredVideoAssets
-  const totalCount = mediaType === 'images' ? (imageData?.assets.length || 0) : (videoData?.assets.length || 0)
+  const totalCount = mediaType === 'all'
+    ? (imageData?.assets.length || 0) + (videoData?.assets.length || 0)
+    : mediaType === 'images'
+      ? (imageData?.assets.length || 0)
+      : (videoData?.assets.length || 0)
 
   // Get sorted models for sidebar
   const sortedModels = useMemo(() => {
@@ -215,6 +232,71 @@ export function GalleryPage() {
   }, [currentModelCounts])
 
   const visibleModels = showAllModels ? sortedModels : sortedModels.slice(0, 5)
+
+  // Navigation function for lightbox buttons
+  const navigateAsset = (direction: 'prev' | 'next') => {
+    if (selectedAsset) {
+      const currentIndex = filteredAssets.findIndex((a) => a.id === selectedAsset.id)
+      if (currentIndex === -1) return
+      const newIndex = direction === 'prev'
+        ? (currentIndex - 1 + filteredAssets.length) % filteredAssets.length
+        : (currentIndex + 1) % filteredAssets.length
+      setSelectedAsset(filteredAssets[newIndex] ?? null)
+    }
+  }
+
+  const navigateVideoAsset = (direction: 'prev' | 'next') => {
+    if (selectedVideoAsset) {
+      const currentIndex = filteredVideoAssets.findIndex((a) => a.id === selectedVideoAsset.id)
+      if (currentIndex === -1) return
+      const newIndex = direction === 'prev'
+        ? (currentIndex - 1 + filteredVideoAssets.length) % filteredVideoAssets.length
+        : (currentIndex + 1) % filteredVideoAssets.length
+      setSelectedVideoAsset(filteredVideoAssets[newIndex] ?? null)
+    }
+  }
+
+  // Keyboard navigation for lightbox
+  useEffect(() => {
+    if (!selectedAsset && !selectedVideoAsset) return
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault()
+        if (selectedAsset) {
+          const currentIndex = filteredAssets.findIndex((a) => a.id === selectedAsset.id)
+          if (currentIndex === -1) return
+          const newIndex = (currentIndex - 1 + filteredAssets.length) % filteredAssets.length
+          setSelectedAsset(filteredAssets[newIndex] ?? null)
+        } else if (selectedVideoAsset) {
+          const currentIndex = filteredVideoAssets.findIndex((a) => a.id === selectedVideoAsset.id)
+          if (currentIndex === -1) return
+          const newIndex = (currentIndex - 1 + filteredVideoAssets.length) % filteredVideoAssets.length
+          setSelectedVideoAsset(filteredVideoAssets[newIndex] ?? null)
+        }
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault()
+        if (selectedAsset) {
+          const currentIndex = filteredAssets.findIndex((a) => a.id === selectedAsset.id)
+          if (currentIndex === -1) return
+          const newIndex = (currentIndex + 1) % filteredAssets.length
+          setSelectedAsset(filteredAssets[newIndex] ?? null)
+        } else if (selectedVideoAsset) {
+          const currentIndex = filteredVideoAssets.findIndex((a) => a.id === selectedVideoAsset.id)
+          if (currentIndex === -1) return
+          const newIndex = (currentIndex + 1) % filteredVideoAssets.length
+          setSelectedVideoAsset(filteredVideoAssets[newIndex] ?? null)
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        setSelectedAsset(null)
+        setSelectedVideoAsset(null)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [selectedAsset, selectedVideoAsset, filteredAssets, filteredVideoAssets])
 
   if (isLoading) {
     return (
@@ -239,13 +321,22 @@ export function GalleryPage() {
         style={{ width: sidebarWidth }}
         className="h-full border-r border-white/5 flex flex-col bg-black/20 flex-shrink-0 relative"
       >
-        {/* Media Type Toggle */}
+        {/* Media Type Tabs */}
         <div className="p-3 border-b border-white/5">
           <div className="flex rounded-lg bg-white/5 p-0.5">
             <button
+              onClick={() => { setMediaType('all'); setSelectedFilter('all') }}
+              className={cn(
+                'flex-1 flex items-center justify-center gap-2 px-2 py-2 rounded-md text-sm font-medium transition-colors',
+                mediaType === 'all' ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white/80'
+              )}
+            >
+              <span>All</span>
+            </button>
+            <button
               onClick={() => { setMediaType('images'); setSelectedFilter('all') }}
               className={cn(
-                'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                'flex-1 flex items-center justify-center gap-2 px-2 py-2 rounded-md text-sm font-medium transition-colors',
                 mediaType === 'images' ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white/80'
               )}
             >
@@ -255,7 +346,7 @@ export function GalleryPage() {
             <button
               onClick={() => { setMediaType('videos'); setSelectedFilter('all') }}
               className={cn(
-                'flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                'flex-1 flex items-center justify-center gap-2 px-2 py-2 rounded-md text-sm font-medium transition-colors',
                 mediaType === 'videos' ? 'bg-white/10 text-white' : 'text-white/50 hover:text-white/80'
               )}
             >
@@ -373,49 +464,89 @@ export function GalleryPage() {
 
       {/* Main Gallery Grid */}
       <div className="flex-1 h-full overflow-y-auto">
-        {currentAssets.length === 0 ? (
+        {(mediaType === 'all' ? (filteredAssets.length + filteredVideoAssets.length) : currentAssets.length) === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-            <p className="text-lg">No {mediaType} yet</p>
-            <p className="text-sm">Go to {mediaType === 'images' ? 'Image' : 'Video'} to create your first {mediaType === 'images' ? 'image' : 'video'}</p>
+            <p className="text-lg">No {mediaType === 'all' ? 'assets' : mediaType} yet</p>
+            <p className="text-sm">Go to Image or Video to create your first assets</p>
           </div>
         ) : (
           <div className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {mediaType === 'images' ? (
-              filteredAssets.map((asset) => (
+            {/* All view - combined and sorted by date */}
+            {mediaType === 'all' && combinedAssets.map((item) => (
+              item.type === 'image' ? (
                 <Card
-                  key={asset.id}
-                  className="aspect-square overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-                  onClick={() => setSelectedAsset(asset)}
+                  key={`img-${item.asset.id}`}
+                  className="aspect-square overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all relative"
+                  onClick={() => setSelectedAsset(item.asset)}
                 >
                   <img
-                    src={asset.url}
-                    alt={asset.prompt}
+                    src={item.asset.url}
+                    alt={item.asset.prompt}
                     className="w-full h-full object-cover"
                     loading="lazy"
                   />
+                  <div className="absolute top-2 left-2 p-1 rounded bg-black/60">
+                    <ImageIcon className="h-3 w-3 text-white/80" />
+                  </div>
                 </Card>
-              ))
-            ) : (
-              filteredVideoAssets.map((asset) => (
+              ) : (
                 <Card
-                  key={asset.id}
+                  key={`vid-${item.asset.id}`}
                   className="aspect-video overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all relative group"
-                  onClick={() => setSelectedVideoAsset(asset)}
+                  onClick={() => setSelectedVideoAsset(item.asset)}
                 >
                   <video
-                    src={asset.url}
+                    src={item.asset.url}
                     className="w-full h-full object-cover"
                     muted
                     loop
                     onMouseEnter={(e) => e.currentTarget.play()}
                     onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0 }}
                   />
+                  <div className="absolute top-2 left-2 p-1 rounded bg-black/60">
+                    <Film className="h-3 w-3 text-white/80" />
+                  </div>
                   <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/60 text-xs text-white/80">
-                    {asset.duration.toFixed(1)}s
+                    {item.asset.duration.toFixed(1)}s
                   </div>
                 </Card>
-              ))
-            )}
+              )
+            ))}
+            {/* Images only view */}
+            {mediaType === 'images' && filteredAssets.map((asset) => (
+              <Card
+                key={`img-${asset.id}`}
+                className="aspect-square overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all relative"
+                onClick={() => setSelectedAsset(asset)}
+              >
+                <img
+                  src={asset.url}
+                  alt={asset.prompt}
+                  className="w-full h-full object-cover"
+                  loading="lazy"
+                />
+              </Card>
+            ))}
+            {/* Videos only view */}
+            {mediaType === 'videos' && filteredVideoAssets.map((asset) => (
+              <Card
+                key={`vid-${asset.id}`}
+                className="aspect-video overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all relative group"
+                onClick={() => setSelectedVideoAsset(asset)}
+              >
+                <video
+                  src={asset.url}
+                  className="w-full h-full object-cover"
+                  muted
+                  loop
+                  onMouseEnter={(e) => e.currentTarget.play()}
+                  onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0 }}
+                />
+                <div className="absolute bottom-2 right-2 px-2 py-0.5 rounded bg-black/60 text-xs text-white/80">
+                  {asset.duration.toFixed(1)}s
+                </div>
+              </Card>
+            ))}
           </div>
         )}
       </div>
@@ -520,7 +651,13 @@ export function GalleryPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <span className="text-xs text-white/40">Model</span>
-                  <p className="text-sm text-white/80">{selectedAsset.model}</p>
+                  <Link
+                    to={`/model/${selectedAsset.model}`}
+                    className="text-sm text-primary hover:underline block"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {selectedAsset.model}
+                  </Link>
                 </div>
                 <div>
                   <span className="text-xs text-white/40">Size</span>
@@ -562,6 +699,21 @@ export function GalleryPage() {
             onClick={() => setSelectedVideoAsset(null)}
           >
             <X className="h-6 w-6" />
+          </button>
+
+          {/* Navigation buttons */}
+          <button
+            className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors z-10"
+            onClick={(e) => { e.stopPropagation(); navigateVideoAsset('prev') }}
+          >
+            <ChevronLeft className="h-6 w-6" />
+          </button>
+
+          <button
+            className="absolute right-[340px] top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors z-10"
+            onClick={(e) => { e.stopPropagation(); navigateVideoAsset('next') }}
+          >
+            <ChevronRight className="h-6 w-6" />
           </button>
 
           {/* Main video area */}
@@ -628,7 +780,13 @@ export function GalleryPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <span className="text-xs text-white/40">Model</span>
-                  <p className="text-sm text-white/80">{selectedVideoAsset.model}</p>
+                  <Link
+                    to={`/model/${selectedVideoAsset.model}`}
+                    className="text-sm text-primary hover:underline block"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {selectedVideoAsset.model}
+                  </Link>
                 </div>
                 <div>
                   <span className="text-xs text-white/40">Size</span>

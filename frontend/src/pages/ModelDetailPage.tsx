@@ -64,6 +64,18 @@ export function ModelDetailPage() {
     },
   })
 
+  const downloadMutation = useMutation({
+    mutationFn: api.downloadModel,
+    onSuccess: () => {
+      // Start polling for cache status
+      const pollInterval = setInterval(async () => {
+        await queryClient.invalidateQueries({ queryKey: ['models-detailed'] })
+      }, 2000)
+      // Stop polling after 5 minutes
+      setTimeout(() => clearInterval(pollInterval), 300000)
+    },
+  })
+
   const model = modelsData?.models.find(m => m.id === modelId)
   const isCurrentModel = modelsData?.current_model === modelId
   const isVideoModel = model?.type === 'video' || model?.type === 'ltx2'
@@ -101,29 +113,41 @@ export function ModelDetailPage() {
     <div className="flex-1 overflow-y-auto scrollbar-thin">
       <div className="max-w-4xl mx-auto p-6 space-y-6">
         {/* Header */}
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => navigate(-1)}
-            className="p-2 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
-          >
-            <ArrowLeft className="h-5 w-5" />
-          </button>
-          <div className="flex items-center gap-3">
-            <div className={cn(
-              'p-2.5 rounded-xl',
-              model.category === 'fast' ? 'bg-yellow-500/20' :
-              model.category === 'quality' ? 'bg-blue-500/20' :
-              model.category === 'specialized' ? 'bg-purple-500/20' :
-              model.category === 'video' ? 'bg-pink-500/20' :
-              'bg-white/10'
-            )}>
-              {getCategoryIcon(model.category)}
-            </div>
-            <div>
-              <h1 className="text-xl font-semibold text-white">{model.name}</h1>
-              <p className="text-sm text-white/40 font-mono">{model.path}</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => navigate(-1)}
+              className="p-2 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+            >
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                'p-2.5 rounded-xl',
+                model.category === 'fast' ? 'bg-yellow-500/20' :
+                model.category === 'quality' ? 'bg-blue-500/20' :
+                model.category === 'specialized' ? 'bg-purple-500/20' :
+                model.category === 'video' ? 'bg-pink-500/20' :
+                'bg-white/10'
+              )}>
+                {getCategoryIcon(model.category)}
+              </div>
+              <div>
+                <h1 className="text-xl font-semibold text-white">{model.name}</h1>
+                <p className="text-sm text-white/40 font-mono">{model.path}</p>
+              </div>
             </div>
           </div>
+          {/* HuggingFace Link - top right */}
+          <a
+            href={`https://huggingface.co/${model.path}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 text-sm transition-colors"
+          >
+            <ExternalLink className="h-4 w-4" />
+            View on HuggingFace
+          </a>
         </div>
 
         {/* Status Banner */}
@@ -149,11 +173,27 @@ export function ModelDetailPage() {
                 </p>
               </div>
             </div>
-            {isCurrentModel && (
-              <span className="px-3 py-1 rounded-full bg-primary/20 text-primary text-sm font-medium">
-                Currently Active
-              </span>
-            )}
+            <div className="flex items-center gap-3">
+              {!model.is_cached && (
+                <button
+                  onClick={() => downloadMutation.mutate(model.id)}
+                  disabled={downloadMutation.isPending}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 transition-colors disabled:opacity-50"
+                >
+                  {downloadMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  {downloadMutation.isPending ? 'Starting...' : 'Download Now'}
+                </button>
+              )}
+              {isCurrentModel && (
+                <span className="px-3 py-1 rounded-full bg-primary/20 text-primary text-sm font-medium">
+                  Currently Active
+                </span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -266,17 +306,6 @@ export function ModelDetailPage() {
               <Play className="h-4 w-4" />
               Use {isVideoModel ? 'for Video' : 'for Image'}
             </Link>
-
-            {/* HuggingFace Link */}
-            <a
-              href={`https://huggingface.co/${model.path}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
-            >
-              <ExternalLink className="h-4 w-4" />
-              View on HuggingFace
-            </a>
 
             {/* Delete Cache Button */}
             {model.is_cached && !isCurrentModel && (

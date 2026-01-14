@@ -44,9 +44,9 @@ npm run lint
 
 ### Running Both Services
 
-Start the backend on port 8000 and frontend on port 5173. The frontend proxies `/api` and `/outputs` to the backend automatically.
+Start the backend on port 8031 and frontend on port 8030. The frontend proxies `/api` and `/outputs` to the backend automatically.
 
-Access the app at `http://spark.local:5173`
+Access the app at `http://spark.local:8030`
 
 ## Architecture
 

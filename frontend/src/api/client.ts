@@ -16,6 +16,34 @@ export interface ModelInfo {
   hf_path: string
 }
 
+// ============== LoRA Types ==============
+
+export interface LoRAApply {
+  lora_id: string
+  weight: number
+}
+
+export interface LoRAInfo {
+  id: string
+  name: string
+  path: string
+  source: 'preset' | 'local' | 'huggingface'
+  compatible_types: string[]
+  default_weight: number
+  description: string
+  is_downloaded: boolean
+}
+
+export interface LoRAListResponse {
+  loras: LoRAInfo[]
+  local_lora_dir: string
+}
+
+export interface LoRAScanResponse {
+  count: number
+  loras: LoRAInfo[]
+}
+
 export interface GenerateRequest {
   prompt: string
   model: string
@@ -27,6 +55,7 @@ export interface GenerateRequest {
   seed?: number
   num_images?: number
   batch_id?: string
+  loras?: LoRAApply[]
 }
 
 export interface ImageResult {
@@ -314,6 +343,62 @@ export interface VideoAssetsResponse {
   total: number
 }
 
+// ============== Image-to-Video (I2V) Types ==============
+
+export interface I2VGenerateRequest {
+  prompt: string
+  model: string
+  image_base64?: string
+  image_asset_id?: string
+  negative_prompt?: string
+  num_frames?: number
+  fps?: number
+  width?: number
+  height?: number
+  steps?: number
+  guidance_scale?: number
+  seed?: number
+  session_id?: string
+  motion_bucket_id?: number
+  noise_aug_strength?: number
+}
+
+export interface I2VJob {
+  id: string
+  session_id: string | null
+  status: JobStatus
+  progress: number
+  current_frame: number
+  total_frames: number
+  eta_seconds: number | null
+  error: string | null
+  download_progress: number
+  download_total_mb: number | null
+  download_speed_mbps: number | null
+  prompt: string
+  model: string
+  source_image_url: string
+  width: number
+  height: number
+  steps: number
+  num_frames: number
+  fps: number
+  video: VideoResult | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface I2VJobResponse {
+  job_id: string
+  status: string
+  message: string
+}
+
+export interface I2VJobListResponse {
+  jobs: I2VJob[]
+}
+
 // ============== System Resource Types ==============
 
 export interface SystemResourceStatus {
@@ -386,6 +471,17 @@ export const api = {
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: 'Failed to delete cache' }))
       throw new Error(error.detail || 'Failed to delete cache')
+    }
+    return res.json()
+  },
+
+  async downloadModel(modelId: string): Promise<{ status: string; model_id: string }> {
+    const res = await fetch(`${API_BASE}/models/${modelId}/download`, {
+      method: 'POST',
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Failed to start download' }))
+      throw new Error(error.detail || 'Failed to start download')
     }
     return res.json()
   },
@@ -541,6 +637,58 @@ export const api = {
   async checkCanGenerate(modelId: string): Promise<ResourceCheckResponse> {
     const res = await fetch(`${API_BASE}/system/can-generate/${modelId}`)
     if (!res.ok) throw new Error('Failed to check resource availability')
+    return res.json()
+  },
+
+  // ============== LoRA Endpoints ==============
+
+  async getLoras(modelType?: string): Promise<LoRAListResponse> {
+    const url = modelType
+      ? `${API_BASE}/loras?model_type=${modelType}`
+      : `${API_BASE}/loras`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Failed to fetch LoRAs')
+    return res.json()
+  },
+
+  async scanLocalLoras(): Promise<LoRAScanResponse> {
+    const res = await fetch(`${API_BASE}/loras/scan`, { method: 'POST' })
+    if (!res.ok) throw new Error('Failed to scan local LoRAs')
+    return res.json()
+  },
+
+  // ============== Image-to-Video (I2V) Endpoints ==============
+
+  async createI2VJob(request: I2VGenerateRequest): Promise<I2VJobResponse> {
+    const res = await fetch(`${API_BASE}/i2v/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Failed to create I2V job' }))
+      if (res.status === 507 && error.detail?.error === 'insufficient_resources') {
+        const resourceError = error.detail as ResourceError
+        throw new Error(resourceError.message)
+      }
+      throw new Error(error.detail?.message || error.detail || 'Failed to create I2V job')
+    }
+    return res.json()
+  },
+
+  async getI2VJob(jobId: string): Promise<I2VJob> {
+    const res = await fetch(`${API_BASE}/i2v/jobs/${jobId}`)
+    if (!res.ok) throw new Error('I2V job not found')
+    return res.json()
+  },
+
+  async getI2VJobs(params?: { session_id?: string; active_only?: boolean }): Promise<I2VJobListResponse> {
+    const searchParams = new URLSearchParams()
+    if (params?.session_id) searchParams.set('session_id', params.session_id)
+    if (params?.active_only) searchParams.set('active_only', 'true')
+    const url = `${API_BASE}/i2v/jobs${searchParams.toString() ? `?${searchParams}` : ''}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Failed to fetch I2V jobs')
     return res.json()
   },
 }
