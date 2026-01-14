@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-HollyWool is a local AI image generation tool designed for the NVIDIA DGX Spark. It provides a simplified KREA-like experience for generating images using diffusion models, without requiring authentication or cloud services.
+HollyWool is a local AI image and video generation tool designed for the NVIDIA DGX Spark. It provides a simplified KREA-like experience for generating images and videos using diffusion models, without requiring authentication or cloud services.
 
 ## Development Commands
 
@@ -59,7 +59,10 @@ HollyWool/
 │   │   │   ├── generate.py    # POST /api/generate, GET /api/models, /api/health
 │   │   │   └── assets.py      # GET/DELETE /api/assets
 │   │   ├── services/
-│   │   │   └── inference.py   # Model loading & generation (diffusers)
+│   │   │   ├── inference.py   # Model loading & generation (diffusers)
+│   │   │   ├── video_jobs.py  # Video generation job queue
+│   │   │   ├── i2v_jobs.py    # Image-to-video job queue
+│   │   │   └── lora_manager.py # LoRA loading and application
 │   │   └── models/
 │   │       └── schemas.py     # Pydantic request/response models
 │   ├── config.yaml            # Model definitions and server settings
@@ -72,8 +75,11 @@ HollyWool/
 │   │   │   ├── Layout.tsx     # App shell with navigation
 │   │   │   └── ui/            # shadcn/ui components
 │   │   ├── pages/
-│   │   │   ├── GeneratePage.tsx  # Model selection, prompt input, preview
-│   │   │   └── GalleryPage.tsx   # Image grid with lightbox viewer
+│   │   │   ├── ImagePage.tsx     # Image generation with model/LoRA selection
+│   │   │   ├── VideoPage.tsx     # Video generation (T2V and I2V)
+│   │   │   ├── AssetsPage.tsx    # Combined gallery with All/Images/Videos tabs
+│   │   │   ├── ModelsPage.tsx    # Model browser and management
+│   │   │   └── ModelDetailPage.tsx # Individual model details and download
 │   │   └── main.tsx           # React entry, routes, QueryClient
 │   └── vite.config.ts         # Dev server proxy configuration
 │
@@ -96,6 +102,11 @@ HollyWool/
 | GET | /api/assets | List generated images |
 | GET | /api/assets/{id} | Get asset metadata |
 | DELETE | /api/assets/{id} | Delete asset |
+| GET | /api/video/assets | List generated videos |
+| POST | /api/video/jobs | Create video generation job |
+| GET | /api/video/jobs/{id} | Get video job status |
+| POST | /api/models/{id}/download | Pre-download model to cache |
+| GET | /api/loras | List available LoRAs |
 
 ## Adding Models
 
@@ -115,3 +126,13 @@ models:
 
 - **Backend:** Python 3.11+, FastAPI, diffusers, torch, Pillow
 - **Frontend:** React 18, Vite, TanStack Query, Tailwind CSS, shadcn/ui components
+
+## Supported Model Types
+
+- **flux** - FLUX.1 models (schnell, dev)
+- **sdxl** - Stable Diffusion XL
+- **sd** - Stable Diffusion 1.x/2.x
+- **sd3** - Stable Diffusion 3
+- **ltx2** - LTX-Video for text-to-video
+- **video-i2v** - CogVideoX Image-to-Video
+- **svd** - Stable Video Diffusion
