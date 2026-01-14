@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import {
   Loader2, Download, Check, ExternalLink, Zap, Sparkles, Star,
-  Shield, AlertCircle, Trash2, HardDrive, Clock
+  Shield, AlertCircle, Trash2, HardDrive, Clock, ChevronRight
 } from 'lucide-react'
 import { api, type ModelDetailedInfo } from '@/api/client'
 import { cn } from '@/lib/utils'
@@ -374,6 +375,16 @@ function ModelCard({ model, expanded, onToggle, onDeleteCache, isDeleting, curre
                 Model will be downloaded automatically when first used
               </p>
             )}
+
+            {/* View Details Link */}
+            <Link
+              to={`/model/${model.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors mt-2"
+            >
+              View Full Details
+              <ChevronRight className="h-4 w-4" />
+            </Link>
           </div>
         )}
       </div>

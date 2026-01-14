@@ -13,6 +13,7 @@ from ..models.schemas import (
     Job, JobResponse, JobListResponse, JobStatus,
     ModelsDetailedResponse, CacheStatusResponse, CacheDeleteResponse,
     VideoGenerateRequest, VideoJob, VideoJobResponse, VideoJobListResponse,
+    SystemResourceStatus, ResourceCheckResponse,
 )
 
 
@@ -75,6 +76,7 @@ def generate_title_from_prompt(prompt: str) -> str:
 from ..services.inference import get_inference_service
 from ..services.jobs import get_job_manager
 from ..services.video_jobs import get_video_job_manager
+from ..services.resources import check_resources_for_video, get_system_resources
 
 router = APIRouter(prefix="/api", tags=["generate"])
 
@@ -301,8 +303,28 @@ async def create_video_job(request: VideoGenerateRequest):
     if not model_config:
         raise HTTPException(status_code=400, detail=f"Unknown model: {request.model}")
 
-    if model_config.get("type") != "video":
+    if model_config.get("type") not in ["video", "ltx2"]:
         raise HTTPException(status_code=400, detail=f"Model {request.model} is not a video model")
+
+    # Check system resources before accepting job
+    model_size_gb = model_config.get("size_gb", 12)  # Default to 12GB if not specified
+    model_name = model_config.get("name", request.model)
+    resource_status = check_resources_for_video(model_size_gb, model_name)
+
+    if not resource_status.is_available:
+        raise HTTPException(
+            status_code=507,  # Insufficient Storage
+            detail={
+                "error": "insufficient_resources",
+                "message": resource_status.rejection_reason,
+                "resources": {
+                    "memory_available_gb": round(resource_status.memory_available_gb, 1),
+                    "memory_required_gb": round(model_size_gb + 5.0 + 10.0, 1),  # model + overhead + buffer
+                    "gpu_utilization": resource_status.gpu_utilization,
+                    "cpu_percent": round(resource_status.cpu_percent, 1),
+                }
+            }
+        )
 
     video_job_manager = get_video_job_manager()
     job = video_job_manager.create_job(request)
@@ -342,3 +364,60 @@ async def list_video_jobs(session_id: str = None, active_only: bool = False):
     jobs = sorted(jobs, key=lambda j: j.created_at, reverse=True)
 
     return VideoJobListResponse(jobs=jobs)
+
+
+# ============== System Resource Endpoints ==============
+
+@router.get("/system/status", response_model=SystemResourceStatus)
+async def get_system_status():
+    """Get current system resource status."""
+    status = get_system_resources()
+    return SystemResourceStatus(
+        memory_total_gb=round(status.memory_total_gb, 2),
+        memory_available_gb=round(status.memory_available_gb, 2),
+        memory_used_gb=round(status.memory_used_gb, 2),
+        memory_percent=round(status.memory_percent, 1),
+        gpu_utilization=round(status.gpu_utilization, 1) if status.gpu_utilization is not None else None,
+        cpu_percent=round(status.cpu_percent, 1),
+        is_available=status.is_available,
+        rejection_reason=status.rejection_reason,
+    )
+
+
+@router.get("/system/can-generate/{model_id}", response_model=ResourceCheckResponse)
+async def check_can_generate(model_id: str):
+    """Check if system can run a specific model."""
+    service = get_inference_service()
+    model_config = service.get_model_config(model_id)
+
+    if not model_config:
+        raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
+
+    model_size_gb = model_config.get("size_gb", 12)
+    model_name = model_config.get("name", model_id)
+
+    status = check_resources_for_video(model_size_gb, model_name)
+
+    # Find video models that would fit in current memory
+    recommended = []
+    for mid, mconfig in service.config["models"].items():
+        if mconfig.get("type") in ["video", "ltx2"]:
+            size = mconfig.get("size_gb", 12)
+            # Required: model + 5GB overhead + 10GB buffer
+            if status.memory_available_gb >= (size + 5.0 + 10.0):
+                recommended.append(mid)
+
+    return ResourceCheckResponse(
+        can_generate=status.is_available,
+        status=SystemResourceStatus(
+            memory_total_gb=round(status.memory_total_gb, 2),
+            memory_available_gb=round(status.memory_available_gb, 2),
+            memory_used_gb=round(status.memory_used_gb, 2),
+            memory_percent=round(status.memory_percent, 1),
+            gpu_utilization=round(status.gpu_utilization, 1) if status.gpu_utilization is not None else None,
+            cpu_percent=round(status.cpu_percent, 1),
+            is_available=status.is_available,
+            rejection_reason=status.rejection_reason,
+        ),
+        recommended_models=recommended,
+    )

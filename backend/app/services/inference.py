@@ -13,6 +13,16 @@ from diffusers import (
     CogVideoXPipeline,
 )
 from diffusers.utils import export_to_video
+
+# Try to import LTX-2 pipeline (requires newer diffusers)
+try:
+    from diffusers import LTX2Pipeline
+    from diffusers.pipelines.ltx2.export_utils import encode_video as ltx2_encode_video
+    LTX2_AVAILABLE = True
+except ImportError:
+    LTX2_AVAILABLE = False
+    LTX2Pipeline = None
+    ltx2_encode_video = None
 from huggingface_hub import snapshot_download, HfFileSystem
 from PIL import Image
 
@@ -195,6 +205,16 @@ class InferenceService:
                     model_path,
                     torch_dtype=self.dtype,
                 )
+            elif model_type == "ltx2":
+                if not LTX2_AVAILABLE:
+                    raise ImportError(
+                        "LTX-2 requires a newer version of diffusers. "
+                        "Install with: pip install git+https://github.com/huggingface/diffusers"
+                    )
+                new_pipeline = LTX2Pipeline.from_pretrained(
+                    model_path,
+                    torch_dtype=torch.bfloat16,
+                )
             else:
                 raise ValueError(f"Unknown model type: {model_type}")
         except Exception as e:
@@ -275,14 +295,16 @@ class InferenceService:
         guidance_scale: Optional[float] = None,
         seed: Optional[int] = None,
         output_path: Optional[str] = None,
-    ) -> tuple[str, int, int, int]:
+    ) -> tuple[str, int, int, int, Optional[str]]:
         """Generate a video and save it to output_path.
 
-        Returns: (output_path, seed, num_frames, fps)
+        Returns: (output_path, seed, num_frames, fps, audio_path)
         """
         self.load_model(model_id)
 
         model_config = self.get_model_config(model_id)
+        model_type = model_config["type"]
+
         if steps is None:
             steps = model_config["default_steps"]
         if guidance_scale is None:
@@ -295,31 +317,83 @@ class InferenceService:
             seed = random.randint(0, 2**32 - 1)
 
         generator = torch.Generator(device=self.device).manual_seed(seed)
+        audio_path = None
 
-        print(f"Generating video: {num_frames} frames at {fps} fps")
+        print(f"Generating video: {num_frames} frames at {fps} fps (model type: {model_type})")
 
-        # Build generation kwargs
-        gen_kwargs = {
-            "prompt": prompt,
-            "num_frames": num_frames,
-            "num_inference_steps": steps,
-            "guidance_scale": guidance_scale,
-            "generator": generator,
-        }
+        if model_type == "ltx2":
+            # LTX-2 specific generation
+            # Ensure dimensions are divisible by 32
+            width = (width // 32) * 32
+            height = (height // 32) * 32
+            # Ensure num_frames is valid (divisible by 8 + 1)
+            valid_frames = [9, 17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121]
+            if num_frames not in valid_frames:
+                # Find closest valid frame count
+                num_frames = min(valid_frames, key=lambda x: abs(x - num_frames))
 
-        # CogVideoX specific settings
-        if negative_prompt:
-            gen_kwargs["negative_prompt"] = negative_prompt
+            gen_kwargs = {
+                "prompt": prompt,
+                "width": width,
+                "height": height,
+                "num_frames": num_frames,
+                "frame_rate": float(fps),
+                "num_inference_steps": steps,
+                "guidance_scale": guidance_scale,
+                "generator": generator,
+                "output_type": "np",
+                "return_dict": False,
+            }
 
-        # Generate video frames
-        video_frames = self.pipeline(**gen_kwargs).frames[0]
+            if negative_prompt:
+                gen_kwargs["negative_prompt"] = negative_prompt
 
-        # Save video to file
-        if output_path:
-            export_to_video(video_frames, output_path, fps=fps)
-            print(f"Video saved to: {output_path}")
+            # Generate video and audio
+            video, audio = self.pipeline(**gen_kwargs)
 
-        return output_path, seed, len(video_frames), fps
+            # Save video with audio using LTX-2's encode_video utility
+            if output_path and ltx2_encode_video:
+                import numpy as np
+                video_uint8 = (video * 255).round().astype("uint8")
+                video_tensor = torch.from_numpy(video_uint8)
+
+                # Get audio sample rate from vocoder if available
+                audio_sr = 24000  # Default LTX-2 audio sample rate
+                if hasattr(self.pipeline, 'vocoder') and hasattr(self.pipeline.vocoder, 'config'):
+                    audio_sr = getattr(self.pipeline.vocoder.config, 'output_sampling_rate', 24000)
+
+                ltx2_encode_video(
+                    video_tensor[0],
+                    fps=fps,
+                    audio=audio[0].float().cpu() if audio is not None else None,
+                    audio_sample_rate=audio_sr,
+                    output_path=output_path,
+                )
+                print(f"Video saved to: {output_path}")
+
+            return output_path, seed, num_frames, fps, audio_path
+        else:
+            # CogVideoX and other video models
+            gen_kwargs = {
+                "prompt": prompt,
+                "num_frames": num_frames,
+                "num_inference_steps": steps,
+                "guidance_scale": guidance_scale,
+                "generator": generator,
+            }
+
+            if negative_prompt:
+                gen_kwargs["negative_prompt"] = negative_prompt
+
+            # Generate video frames
+            video_frames = self.pipeline(**gen_kwargs).frames[0]
+
+            # Save video to file
+            if output_path:
+                export_to_video(video_frames, output_path, fps=fps)
+                print(f"Video saved to: {output_path}")
+
+            return output_path, seed, len(video_frames), fps, None
 
     def is_gpu_available(self) -> bool:
         return torch.cuda.is_available()

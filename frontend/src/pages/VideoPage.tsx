@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Sparkles, ChevronDown, Palette, X, Wand2,
   Plus, MessageSquare, MoreHorizontal, Pencil, GripVertical, Trash2, Square, Monitor,
-  AlertCircle, Loader2, Download
+  AlertCircle, Loader2, Download, Volume2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import {
@@ -28,6 +28,20 @@ interface VideoModel {
 
 const videoModels: VideoModel[] = [
   {
+    id: 'ltx-2',
+    name: 'LTX-2',
+    description: 'High-quality video + audio, 5s at 24fps',
+    maxDuration: 5,
+    supportedResolutions: ['720p', '1080p'],
+  },
+  {
+    id: 'ltx-2-fp8',
+    name: 'LTX-2 (FP8)',
+    description: 'LTX-2 with lower memory usage',
+    maxDuration: 5,
+    supportedResolutions: ['720p', '1080p'],
+  },
+  {
     id: 'cogvideox-5b',
     name: 'CogVideoX-5B',
     description: 'High-quality video generation, 6s clips',
@@ -39,38 +53,6 @@ const videoModels: VideoModel[] = [
     name: 'CogVideoX-2B',
     description: 'Faster, lighter video model',
     maxDuration: 6,
-    supportedResolutions: ['720p'],
-  },
-  {
-    id: 'wan2-1-t2v',
-    name: 'Wan2.1 T2V',
-    description: 'Text-to-video, cinematic quality',
-    maxDuration: 5,
-    supportedResolutions: ['720p', '1080p'],
-    requiresApproval: true,
-    approvalUrl: 'https://huggingface.co/Wan-AI/Wan2.1-T2V-14B',
-  },
-  {
-    id: 'wan2-1-i2v',
-    name: 'Wan2.1 I2V',
-    description: 'Image-to-video animation',
-    maxDuration: 5,
-    supportedResolutions: ['720p', '1080p'],
-    requiresApproval: true,
-    approvalUrl: 'https://huggingface.co/Wan-AI/Wan2.1-I2V-14B',
-  },
-  {
-    id: 'ltx-video',
-    name: 'LTX-Video',
-    description: 'Fast video generation',
-    maxDuration: 5,
-    supportedResolutions: ['720p'],
-  },
-  {
-    id: 'mochi-1',
-    name: 'Mochi 1',
-    description: 'Genmo\'s open video model',
-    maxDuration: 5,
     supportedResolutions: ['720p'],
   },
 ]
@@ -99,7 +81,7 @@ const DEFAULT_SIDEBAR_WIDTH = 256
 
 export function VideoPage() {
   const [prompt, setPrompt] = useState('')
-  const [selectedModel, setSelectedModel] = useState<string>('cogvideox-5b')
+  const [selectedModel, setSelectedModel] = useState<string>('ltx-2')
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9')
   const [resolution, setResolution] = useState<Resolution>('720p')
   const [selectedStyle, setSelectedStyle] = useState('none')
@@ -121,6 +103,14 @@ export function VideoPage() {
   const sidebarRef = useRef<HTMLDivElement>(null)
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Helper to close all dropdown menus
+  const closeAllMenus = useCallback(() => {
+    setShowModelMenu(false)
+    setShowStyleMenu(false)
+    setShowAspectMenu(false)
+    setShowResolutionMenu(false)
+  }, [])
 
   // Video generation state - track jobs by ID like ImagePage
   const [activeJobs, setActiveJobs] = useState<Record<string, VideoJob>>({})
@@ -556,7 +546,14 @@ export function VideoPage() {
                       <div className="p-4">
                         <p className="text-sm text-white/80 mb-2 line-clamp-2">{job.prompt}</p>
                         <div className="flex items-center justify-between text-xs text-white/40">
-                          <span>{job.video.width}x{job.video.height} • {job.video.duration.toFixed(1)}s • {job.video.fps}fps</span>
+                          <div className="flex items-center gap-2">
+                            <span>{job.video.width}x{job.video.height} • {job.video.duration.toFixed(1)}s • {job.video.fps}fps</span>
+                            {job.video.has_audio && (
+                              <span className="flex items-center gap-1 text-primary" title="Has synchronized audio">
+                                <Volume2 className="h-3 w-3" />
+                              </span>
+                            )}
+                          </div>
                           <div className="flex items-center gap-2">
                             <a
                               href={job.video.url}
@@ -629,7 +626,11 @@ export function VideoPage() {
                 {/* Model Selector */}
                 <div className="relative">
                   <button
-                    onClick={() => setShowModelMenu(!showModelMenu)}
+                    onClick={() => {
+                      const isOpen = !showModelMenu
+                      closeAllMenus()
+                      setShowModelMenu(isOpen)
+                    }}
                     className="model-pill"
                   >
                     <Wand2 className="h-3.5 w-3.5" />
@@ -639,7 +640,7 @@ export function VideoPage() {
 
                   {showModelMenu && (
                     <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowModelMenu(false)} />
+                      <div className="fixed inset-0 z-40" onClick={closeAllMenus} />
                       <div className="absolute bottom-full left-0 mb-2 w-64 py-1 rounded-xl glass-light shadow-xl z-50">
                         {videoModels.map((model) => (
                           <button
@@ -675,7 +676,11 @@ export function VideoPage() {
                 {/* Style Selector */}
                 <div className="relative">
                   <button
-                    onClick={() => setShowStyleMenu(!showStyleMenu)}
+                    onClick={() => {
+                      const isOpen = !showStyleMenu
+                      closeAllMenus()
+                      setShowStyleMenu(isOpen)
+                    }}
                     className={cn(
                       'model-pill',
                       selectedStyle !== 'none' && 'bg-primary/20 text-primary'
@@ -688,7 +693,7 @@ export function VideoPage() {
 
                   {showStyleMenu && (
                     <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowStyleMenu(false)} />
+                      <div className="fixed inset-0 z-40" onClick={closeAllMenus} />
                       <div className="absolute bottom-full left-0 mb-2 w-48 py-1 rounded-xl glass-light shadow-xl z-50">
                         {stylePresets.map((style) => (
                           <button
@@ -716,7 +721,11 @@ export function VideoPage() {
                 {/* Aspect Ratio Selector */}
                 <div className="relative">
                   <button
-                    onClick={() => setShowAspectMenu(!showAspectMenu)}
+                    onClick={() => {
+                      const isOpen = !showAspectMenu
+                      closeAllMenus()
+                      setShowAspectMenu(isOpen)
+                    }}
                     className="model-pill"
                   >
                     <Square className="h-3.5 w-3.5" />
@@ -726,7 +735,7 @@ export function VideoPage() {
 
                   {showAspectMenu && (
                     <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowAspectMenu(false)} />
+                      <div className="fixed inset-0 z-40" onClick={closeAllMenus} />
                       <div className="absolute bottom-full left-0 mb-2 p-3 rounded-xl glass-light shadow-xl z-50">
                         <div className="grid grid-cols-3 gap-2">
                           {aspectRatios.map((ratio) => (
@@ -755,7 +764,11 @@ export function VideoPage() {
                 {/* Resolution Selector */}
                 <div className="relative">
                   <button
-                    onClick={() => setShowResolutionMenu(!showResolutionMenu)}
+                    onClick={() => {
+                      const isOpen = !showResolutionMenu
+                      closeAllMenus()
+                      setShowResolutionMenu(isOpen)
+                    }}
                     className="model-pill"
                   >
                     <Monitor className="h-3.5 w-3.5" />
@@ -765,7 +778,7 @@ export function VideoPage() {
 
                   {showResolutionMenu && (
                     <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowResolutionMenu(false)} />
+                      <div className="fixed inset-0 z-40" onClick={closeAllMenus} />
                       <div className="absolute bottom-full left-0 mb-2 w-32 py-1 rounded-xl glass-light shadow-xl z-50">
                         {availableResolutions.map((res) => (
                           <button

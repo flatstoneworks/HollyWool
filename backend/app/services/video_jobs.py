@@ -15,6 +15,8 @@ from .inference import get_inference_service
 VIDEO_MODEL_BASE_TIMES = {
     "cogvideox-5b": 180,  # ~3 minutes per video
     "cogvideox-2b": 90,   # ~1.5 minutes per video
+    "ltx-2": 120,         # ~2 minutes per video (with audio)
+    "ltx-2-fp8": 90,      # ~1.5 minutes (FP8 quantized)
 }
 
 # Time to load a new model (seconds)
@@ -237,8 +239,8 @@ class VideoJobManager:
             guidance = model_config["default_guidance"]
             seed = random.randint(0, 2**32 - 1)
 
-            # Generate video
-            output_path, actual_seed, actual_frames, actual_fps = service.generate_video(
+            # Generate video (returns audio_path for LTX-2 models)
+            output_path, actual_seed, actual_frames, actual_fps, audio_path = service.generate_video(
                 prompt=job.prompt,
                 model_id=job.model,
                 width=job.width,
@@ -257,6 +259,9 @@ class VideoJobManager:
             # Calculate duration
             duration = actual_frames / actual_fps
 
+            # Check if model type supports audio (LTX-2)
+            has_audio = model_config.get("type") == "ltx2"
+
             # Save metadata
             metadata = {
                 "id": asset_id,
@@ -272,6 +277,7 @@ class VideoJobManager:
                 "num_frames": actual_frames,
                 "fps": actual_fps,
                 "duration": duration,
+                "has_audio": has_audio,
                 "created_at": datetime.utcnow().isoformat(),
             }
 
@@ -289,6 +295,7 @@ class VideoJobManager:
                 num_frames=actual_frames,
                 width=job.width,
                 height=job.height,
+                has_audio=has_audio,
             )
 
             # Update job as completed

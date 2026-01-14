@@ -249,6 +249,7 @@ export interface VideoResult {
   num_frames: number
   width: number
   height: number
+  has_audio?: boolean  // LTX-2 generates synchronized audio
 }
 
 export interface VideoJob {
@@ -311,6 +312,36 @@ export interface VideoAsset {
 export interface VideoAssetsResponse {
   assets: VideoAsset[]
   total: number
+}
+
+// ============== System Resource Types ==============
+
+export interface SystemResourceStatus {
+  memory_total_gb: number
+  memory_available_gb: number
+  memory_used_gb: number
+  memory_percent: number
+  gpu_utilization: number | null
+  cpu_percent: number
+  is_available: boolean
+  rejection_reason: string | null
+}
+
+export interface ResourceCheckResponse {
+  can_generate: boolean
+  status: SystemResourceStatus
+  recommended_models: string[]
+}
+
+export interface ResourceError {
+  error: 'insufficient_resources'
+  message: string
+  resources: {
+    memory_available_gb: number
+    memory_required_gb: number
+    gpu_utilization: number | null
+    cpu_percent: number
+  }
 }
 
 export const api = {
@@ -450,7 +481,12 @@ export const api = {
     })
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: 'Failed to create video job' }))
-      throw new Error(error.detail || 'Failed to create video job')
+      // Check for resource error (507 Insufficient Storage)
+      if (res.status === 507 && error.detail?.error === 'insufficient_resources') {
+        const resourceError = error.detail as ResourceError
+        throw new Error(resourceError.message)
+      }
+      throw new Error(error.detail?.message || error.detail || 'Failed to create video job')
     }
     return res.json()
   },
@@ -493,5 +529,18 @@ export const api = {
   async deleteVideoAsset(id: string): Promise<void> {
     const res = await fetch(`${API_BASE}/video-assets/${id}`, { method: 'DELETE' })
     if (!res.ok) throw new Error('Failed to delete video asset')
+  },
+
+  // System resource endpoints
+  async getSystemStatus(): Promise<SystemResourceStatus> {
+    const res = await fetch(`${API_BASE}/system/status`)
+    if (!res.ok) throw new Error('Failed to fetch system status')
+    return res.json()
+  },
+
+  async checkCanGenerate(modelId: string): Promise<ResourceCheckResponse> {
+    const res = await fetch(`${API_BASE}/system/can-generate/${modelId}`)
+    if (!res.ok) throw new Error('Failed to check resource availability')
+    return res.json()
   },
 }

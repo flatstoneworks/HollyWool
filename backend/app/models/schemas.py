@@ -198,6 +198,7 @@ class VideoResult(BaseModel):
     num_frames: int
     width: int
     height: int
+    has_audio: bool = False  # LTX-2 generates synchronized audio
 
 
 class VideoJob(BaseModel):
@@ -260,3 +261,24 @@ class VideoAssetMetadata(BaseModel):
 class VideoAssetListResponse(BaseModel):
     assets: list[VideoAssetMetadata]
     total: int
+
+
+# ============== System Resource Schemas ==============
+
+class SystemResourceStatus(BaseModel):
+    """Current system resource status for video generation."""
+    memory_total_gb: float
+    memory_available_gb: float
+    memory_used_gb: float
+    memory_percent: float
+    gpu_utilization: Optional[float] = None  # 0-100, None if unavailable
+    cpu_percent: float
+    is_available: bool
+    rejection_reason: Optional[str] = None
+
+
+class ResourceCheckResponse(BaseModel):
+    """Response for resource check endpoint."""
+    can_generate: bool
+    status: SystemResourceStatus
+    recommended_models: list[str] = []  # Models that fit in available memory

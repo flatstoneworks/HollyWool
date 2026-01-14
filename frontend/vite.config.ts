@@ -15,11 +15,11 @@ export default defineConfig({
     allowedHosts: ['spark.local'],
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:5171',
         changeOrigin: true,
       },
       '/outputs': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:5171',
         changeOrigin: true,
       },
     },

@@ -7,6 +7,8 @@ import { ImagePage } from './pages/ImagePage'
 import { VideoPage } from './pages/VideoPage'
 import { GalleryPage } from './pages/GalleryPage'
 import { ModelsPage } from './pages/ModelsPage'
+import { JobDetailPage } from './pages/JobDetailPage'
+import { ModelDetailPage } from './pages/ModelDetailPage'
 import './index.css'
 
 const queryClient = new QueryClient({
@@ -29,6 +31,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="video" element={<VideoPage />} />
             <Route path="gallery" element={<GalleryPage />} />
             <Route path="models" element={<ModelsPage />} />
+            <Route path="model/:modelId" element={<ModelDetailPage />} />
+            <Route path="job/:jobId" element={<JobDetailPage />} />
           </Route>
         </Routes>
       </BrowserRouter>
