@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import {
   Loader2, Trash2, Copy, X, ChevronLeft, ChevronRight,
   Search, Home, Wand2, ChevronDown, ChevronUp, Download,
-  MessageSquare, GripVertical, ImageIcon, Film
+  GripVertical, ImageIcon, Film, ArrowUpCircle
 } from 'lucide-react'
 import { api, type Asset, type VideoAsset } from '@/api/client'
 import { Card } from '@/components/ui/card'
@@ -58,6 +58,16 @@ export function AssetsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['video-assets'] })
       setSelectedVideoAsset(null)
+    },
+  })
+
+  const upscaleMutation = useMutation({
+    mutationFn: (videoAssetId: string) => api.createUpscaleJob({ video_asset_id: videoAssetId }),
+    onSuccess: (data) => {
+      alert(`Upscale job started! ETA: ${Math.round(data.eta_seconds || 0)}s\n\nThe upscaled video will appear in your assets when complete.`)
+    },
+    onError: (error: Error) => {
+      alert(`Failed to start upscale: ${error.message}`)
     },
   })
 
@@ -735,6 +745,23 @@ export function AssetsPage() {
                 <Download className="h-5 w-5" />
               </button>
               <button
+                onClick={() => {
+                  if (confirm(`Upscale this video to 4x resolution?\n\nOriginal: ${selectedVideoAsset.width}x${selectedVideoAsset.height}\nUpscaled: ${selectedVideoAsset.width * 4}x${selectedVideoAsset.height * 4}`)) {
+                    upscaleMutation.mutate(selectedVideoAsset.id)
+                  }
+                }}
+                disabled={upscaleMutation.isPending}
+                className="px-3 py-2 rounded-lg bg-white/10 hover:bg-primary/50 transition-colors disabled:opacity-50 flex items-center gap-2"
+                title="Upscale 4x"
+              >
+                {upscaleMutation.isPending ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <ArrowUpCircle className="h-5 w-5" />
+                )}
+                <span className="text-sm font-medium">Upscale 4x</span>
+              </button>
+              <button
                 onClick={() => copyToClipboard(selectedVideoAsset.seed.toString())}
                 className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
                 title="Copy seed"
@@ -742,19 +769,12 @@ export function AssetsPage() {
                 <Copy className="h-5 w-5" />
               </button>
               <button
-                onClick={() => copyToClipboard(selectedVideoAsset.prompt)}
-                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                title="Copy prompt"
-              >
-                <MessageSquare className="h-5 w-5" />
-              </button>
-              <button
                 onClick={() => {
                   if (confirm('Delete this video?')) {
                     deleteVideoMutation.mutate(selectedVideoAsset.id)
                   }
                 }}
-                className="p-2 rounded-lg bg-white/10 hover:bg-red-500/50 transition-colors"
+                className="p-2 rounded-lg bg-white/10 hover:bg-red-500 hover:text-white transition-colors"
                 title="Delete"
               >
                 <Trash2 className="h-5 w-5" />

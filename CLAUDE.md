@@ -107,6 +107,10 @@ HollyWool/
 | GET | /api/video/jobs/{id} | Get video job status |
 | POST | /api/models/{id}/download | Pre-download model to cache |
 | GET | /api/loras | List available LoRAs |
+| GET | /api/upscale/models | List available upscale models |
+| POST | /api/upscale/jobs | Create video upscale job |
+| GET | /api/upscale/jobs/{id} | Get upscale job status |
+| GET | /api/upscale/jobs | List upscale jobs |
 
 ## Adding Models
 

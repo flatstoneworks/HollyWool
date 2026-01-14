@@ -14,7 +14,6 @@ import { api, VideoJob, VideoGenerateRequest, I2VJob, I2VGenerateRequest } from 
 
 type AspectRatio = '16:9' | '9:16' | '1:1'
 type Resolution = '720p' | '1080p'
-type VideoMode = 't2v' | 'i2v'
 
 // Video generation models
 interface VideoModel {
@@ -25,7 +24,7 @@ interface VideoModel {
   supportedResolutions: Resolution[]
   requiresApproval?: boolean
   approvalUrl?: string
-  mode: VideoMode  // t2v = text-to-video, i2v = image-to-video
+  supportsI2V: boolean  // true if model supports image-to-video
 }
 
 const videoModels: VideoModel[] = [
@@ -36,7 +35,7 @@ const videoModels: VideoModel[] = [
     description: 'High-quality video + audio, 5s at 24fps',
     maxDuration: 5,
     supportedResolutions: ['720p', '1080p'],
-    mode: 't2v',
+    supportsI2V: false,
   },
   {
     id: 'ltx-2-fp8',
@@ -44,7 +43,7 @@ const videoModels: VideoModel[] = [
     description: 'LTX-2 with lower memory usage',
     maxDuration: 5,
     supportedResolutions: ['720p', '1080p'],
-    mode: 't2v',
+    supportsI2V: false,
   },
   {
     id: 'cogvideox-5b',
@@ -52,7 +51,7 @@ const videoModels: VideoModel[] = [
     description: 'High-quality video generation, 6s clips',
     maxDuration: 6,
     supportedResolutions: ['720p'],
-    mode: 't2v',
+    supportsI2V: false,
   },
   {
     id: 'cogvideox-2b',
@@ -60,16 +59,16 @@ const videoModels: VideoModel[] = [
     description: 'Faster, lighter video model',
     maxDuration: 6,
     supportedResolutions: ['720p'],
-    mode: 't2v',
+    supportsI2V: false,
   },
   // Image-to-Video models
   {
     id: 'cogvideox-5b-i2v',
-    name: 'CogVideoX-5B I2V',
-    description: 'Animate images into video clips',
+    name: 'CogVideoX-5B',
+    description: 'Animate images into video clips, 6s',
     maxDuration: 6,
     supportedResolutions: ['720p'],
-    mode: 'i2v',
+    supportsI2V: true,
   },
   {
     id: 'svd-xt',
@@ -77,7 +76,7 @@ const videoModels: VideoModel[] = [
     description: 'Stable Video Diffusion, smooth motion',
     maxDuration: 4,
     supportedResolutions: ['720p', '1080p'],
-    mode: 'i2v',
+    supportsI2V: true,
   },
 ]
 
@@ -105,7 +104,6 @@ const DEFAULT_SIDEBAR_WIDTH = 256
 
 export function VideoPage() {
   const [prompt, setPrompt] = useState('')
-  const [mode, setMode] = useState<VideoMode>('t2v')
   const [selectedModel, setSelectedModel] = useState<string>('ltx-2')
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9')
   const [resolution, setResolution] = useState<Resolution>('720p')
@@ -346,8 +344,9 @@ export function VideoPage() {
               delete next[jobId]
               return next
             })
-            if (updatedJob.video?.url) {
-              updateVideoSession(updatedJob.session_id, { thumbnail: updatedJob.video.url })
+            // Use source image as thumbnail for I2V (it's an actual image, not video)
+            if (updatedJob.source_image_url) {
+              updateVideoSession(updatedJob.session_id, { thumbnail: updatedJob.source_image_url })
               setSessions(getVideoSessions())
             }
           } else if (updatedJob.status === 'failed') {
@@ -431,15 +430,6 @@ export function VideoPage() {
     }
   }, [selectedModel])
 
-  // Switch to first model of selected mode when mode changes
-  useEffect(() => {
-    const modelsForMode = videoModels.filter(m => m.mode === mode)
-    const firstModel = modelsForMode[0]
-    if (firstModel && !modelsForMode.some(m => m.id === selectedModel)) {
-      setSelectedModel(firstModel.id)
-    }
-  }, [mode])
-
   // Handle file upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -474,9 +464,9 @@ export function VideoPage() {
   const handleGenerate = async () => {
     if (!prompt.trim() || isSubmitting || !currentSession) return
 
-    // For I2V mode, require an image
-    if (mode === 'i2v' && !sourceImage) {
-      setError('Please upload a source image for image-to-video generation')
+    // For I2V models, require an image
+    if (selectedModelInfo.supportsI2V && !sourceImage) {
+      setError('Please upload a source image for this model')
       return
     }
 
@@ -487,7 +477,7 @@ export function VideoPage() {
     const fullPrompt = selectedStyleInfo.prefix + prompt.trim()
 
     try {
-      if (mode === 'i2v' && sourceImage) {
+      if (selectedModelInfo.supportsI2V && sourceImage) {
         // I2V generation
         const imageBase64 = await fileToBase64(sourceImage)
         const request: I2VGenerateRequest = {
@@ -503,7 +493,7 @@ export function VideoPage() {
         const job = await api.getI2VJob(response.job_id)
         setActiveI2VJobs(prev => ({ ...prev, [job.id]: job }))
         setPrompt('')
-        clearSourceImage()
+        // Don't clear source image - let user keep it for retries if generation fails
       } else {
         // T2V generation
         const request: VideoGenerateRequest = {
@@ -612,7 +602,11 @@ export function VideoPage() {
                 >
                   {session.thumbnail ? (
                     <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0 bg-white/5">
-                      <img src={session.thumbnail} alt="" className="w-full h-full object-cover" />
+                      {session.thumbnail.endsWith('.mp4') ? (
+                        <video src={session.thumbnail} className="w-full h-full object-cover" muted />
+                      ) : (
+                        <img src={session.thumbnail} alt="" className="w-full h-full object-cover" />
+                      )}
                     </div>
                   ) : (
                     <div className="w-8 h-8 rounded flex-shrink-0 bg-white/5 flex items-center justify-center">
@@ -948,34 +942,6 @@ export function VideoPage() {
         >
           <div className="max-w-3xl mx-auto">
             <div className="glass rounded-2xl p-3">
-              {/* Mode Toggle */}
-              <div className="flex items-center justify-center mb-3">
-                <div className="flex bg-white/5 rounded-full p-0.5">
-                  <button
-                    onClick={() => setMode('t2v')}
-                    className={cn(
-                      'px-4 py-1.5 rounded-full text-sm font-medium transition-all',
-                      mode === 't2v'
-                        ? 'bg-primary text-white'
-                        : 'text-white/60 hover:text-white'
-                    )}
-                  >
-                    Text to Video
-                  </button>
-                  <button
-                    onClick={() => setMode('i2v')}
-                    className={cn(
-                      'px-4 py-1.5 rounded-full text-sm font-medium transition-all',
-                      mode === 'i2v'
-                        ? 'bg-primary text-white'
-                        : 'text-white/60 hover:text-white'
-                    )}
-                  >
-                    Image to Video
-                  </button>
-                </div>
-              </div>
-
               {/* Top row - Options */}
               <div className="flex items-center gap-2 mb-3 px-1 flex-wrap">
                 {/* Model Selector */}
@@ -988,6 +954,7 @@ export function VideoPage() {
                     }}
                     className="model-pill"
                   >
+                    {selectedModelInfo.supportsI2V && <ImageIcon className="h-3.5 w-3.5 text-primary" />}
                     <Wand2 className="h-3.5 w-3.5" />
                     <span>{selectedModelInfo.name}</span>
                     <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', showModelMenu && 'rotate-180')} />
@@ -997,7 +964,7 @@ export function VideoPage() {
                     <>
                       <div className="fixed inset-0 z-40" onClick={closeAllMenus} />
                       <div className="absolute bottom-full left-0 mb-2 w-64 py-1 rounded-xl glass-light shadow-xl z-50">
-                        {videoModels.filter(m => m.mode === mode).map((model) => (
+                        {videoModels.map((model) => (
                           <button
                             key={model.id}
                             onClick={() => {
@@ -1010,16 +977,21 @@ export function VideoPage() {
                               selectedModel === model.id && 'text-primary'
                             )}
                           >
-                            <div className="flex items-center justify-between">
-                              <div className="font-medium">{model.name}</div>
-                              {model.requiresApproval && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
-                                  Approval
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-xs text-white/40 mt-0.5">
-                              {model.description}
+                            <div className="flex items-center gap-2">
+                              {model.supportsI2V && <ImageIcon className="h-4 w-4 text-primary flex-shrink-0" />}
+                              <div className="flex-1">
+                                <div className="flex items-center justify-between">
+                                  <div className="font-medium">{model.name}</div>
+                                  {model.requiresApproval && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
+                                      Approval
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-xs text-white/40 mt-0.5">
+                                  {model.description}
+                                </div>
+                              </div>
                             </div>
                           </button>
                         ))}
@@ -1157,8 +1129,8 @@ export function VideoPage() {
                 </div>
               </div>
 
-              {/* Image upload area - I2V mode only */}
-              {mode === 'i2v' && (
+              {/* Image upload area - I2V models only */}
+              {selectedModelInfo.supportsI2V && (
                 <div className="mb-3 px-1">
                   {sourceImagePreview ? (
                     <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5">
@@ -1204,7 +1176,7 @@ export function VideoPage() {
                 <div className="flex-1 bg-white/5 rounded-xl px-4 py-3">
                   <textarea
                     ref={textareaRef}
-                    placeholder={mode === 'i2v'
+                    placeholder={selectedModelInfo.supportsI2V
                       ? "Describe how the image should animate..."
                       : "Describe a video and click generate..."}
                     value={prompt}
@@ -1217,7 +1189,7 @@ export function VideoPage() {
                 </div>
                 <button
                   onClick={handleGenerate}
-                  disabled={!prompt.trim() || isSubmitting || (mode === 'i2v' && !sourceImage)}
+                  disabled={!prompt.trim() || isSubmitting || (selectedModelInfo.supportsI2V && !sourceImage)}
                   className="generate-btn flex items-center gap-2"
                 >
                   {isSubmitting ? (

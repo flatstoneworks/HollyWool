@@ -242,6 +242,36 @@ models:
     size_gb: 9
     requires_approval: false
 
+# === VIDEO UPSCALE MODELS ===
+upscale_models:
+  realesrgan-x4plus:
+    name: "Real-ESRGAN 4x Plus"
+    model_name: "RealESRGAN_x4plus"
+    scale: 4
+    description: "General purpose 4x upscaling, best for real-world content"
+    size_gb: 0.065
+
+  realesrgan-x2plus:
+    name: "Real-ESRGAN 2x Plus"
+    model_name: "RealESRGAN_x2plus"
+    scale: 2
+    description: "General purpose 2x upscaling"
+    size_gb: 0.065
+
+  realesrgan-x4-anime:
+    name: "Real-ESRGAN Anime 4x"
+    model_name: "RealESRGAN_x4plus_anime_6B"
+    scale: 4
+    description: "Optimized for anime/cartoon content"
+    size_gb: 0.018
+
+  realesrgan-x4-video:
+    name: "Real-ESRGAN Video 4x"
+    model_name: "realesr-animevideov3"
+    scale: 4
+    description: "Optimized for video upscaling with temporal consistency"
+    size_gb: 0.018
+
 # LoRA configuration
 loras:
   local_dir: "~/.hollywool/loras"

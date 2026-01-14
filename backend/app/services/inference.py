@@ -223,9 +223,11 @@ class InferenceService:
                     torch_dtype=self.dtype,
                 )
             elif model_type == "svd":
+                # SVD requires float16, not bfloat16 (numpy doesn't support bfloat16)
+                svd_dtype = torch.float16 if self.device == "cuda" else torch.float32
                 new_pipeline = StableVideoDiffusionPipeline.from_pretrained(
                     model_path,
-                    torch_dtype=self.dtype,
+                    torch_dtype=svd_dtype,
                     variant="fp16" if self.device == "cuda" else None,
                 )
             else:
@@ -505,7 +507,7 @@ class InferenceService:
             video_frames = self.pipeline(**gen_kwargs).frames[0]
 
         elif model_type == "svd":
-            # Stable Video Diffusion
+            # Stable Video Diffusion - pass PIL image directly
             gen_kwargs = {
                 "image": image,
                 "num_frames": num_frames,

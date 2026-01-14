@@ -429,6 +429,63 @@ export interface ResourceError {
   }
 }
 
+// ============== Video Upscale Types ==============
+
+export interface VideoUpscaleRequest {
+  video_asset_id: string
+  model?: string
+  session_id?: string
+}
+
+export interface UpscaleModelInfo {
+  id: string
+  name: string
+  scale: number
+  description: string
+}
+
+export interface UpscaleModelsResponse {
+  models: UpscaleModelInfo[]
+}
+
+export interface UpscaleJob {
+  id: string
+  session_id: string | null
+  status: JobStatus
+  progress: number
+  current_frame: number
+  total_frames: number
+  eta_seconds: number | null
+  error: string | null
+  // Source info
+  source_video_id: string
+  source_width: number
+  source_height: number
+  source_fps: number
+  source_duration: number
+  // Upscale config
+  model: string
+  scale_factor: number
+  target_width: number
+  target_height: number
+  // Result
+  video: VideoResult | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface UpscaleJobResponse {
+  job_id: string
+  status: string
+  message: string
+  eta_seconds?: number
+}
+
+export interface UpscaleJobListResponse {
+  jobs: UpscaleJob[]
+}
+
 export const api = {
   async health(): Promise<HealthResponse> {
     const res = await fetch(`${API_BASE}/health`)
@@ -689,6 +746,43 @@ export const api = {
     const url = `${API_BASE}/i2v/jobs${searchParams.toString() ? `?${searchParams}` : ''}`
     const res = await fetch(url)
     if (!res.ok) throw new Error('Failed to fetch I2V jobs')
+    return res.json()
+  },
+
+  // ============== Video Upscale Endpoints ==============
+
+  async getUpscaleModels(): Promise<UpscaleModelsResponse> {
+    const res = await fetch(`${API_BASE}/upscale/models`)
+    if (!res.ok) throw new Error('Failed to fetch upscale models')
+    return res.json()
+  },
+
+  async createUpscaleJob(request: VideoUpscaleRequest): Promise<UpscaleJobResponse> {
+    const res = await fetch(`${API_BASE}/upscale/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Failed to create upscale job' }))
+      throw new Error(error.detail?.message || error.detail || 'Failed to create upscale job')
+    }
+    return res.json()
+  },
+
+  async getUpscaleJob(jobId: string): Promise<UpscaleJob> {
+    const res = await fetch(`${API_BASE}/upscale/jobs/${jobId}`)
+    if (!res.ok) throw new Error('Upscale job not found')
+    return res.json()
+  },
+
+  async getUpscaleJobs(params?: { session_id?: string; active_only?: boolean }): Promise<UpscaleJobListResponse> {
+    const searchParams = new URLSearchParams()
+    if (params?.session_id) searchParams.set('session_id', params.session_id)
+    if (params?.active_only) searchParams.set('active_only', 'true')
+    const url = `${API_BASE}/upscale/jobs${searchParams.toString() ? `?${searchParams}` : ''}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Failed to fetch upscale jobs')
     return res.json()
   },
 }

@@ -379,3 +379,66 @@ class I2VJobResponse(BaseModel):
 class I2VJobListResponse(BaseModel):
     """Response listing I2V jobs."""
     jobs: list[I2VJob]
+
+
+# ============== Video Upscale Schemas ==============
+
+class VideoUpscaleRequest(BaseModel):
+    """Request to upscale an existing video using Real-ESRGAN."""
+    video_asset_id: str = Field(..., description="ID of the source video to upscale")
+    model: str = Field(default="realesrgan-x4plus", description="Upscale model to use")
+    session_id: Optional[str] = Field(default=None, description="Session to link the upscaled video to")
+
+
+class UpscaleModelInfo(BaseModel):
+    """Information about an available upscale model."""
+    id: str
+    name: str
+    scale: int
+    description: str
+
+
+class UpscaleModelsResponse(BaseModel):
+    """Response listing available upscale models."""
+    models: list[UpscaleModelInfo]
+
+
+class UpscaleJob(BaseModel):
+    """Video upscale job status."""
+    id: str
+    session_id: Optional[str] = None
+    status: str = JobStatus.QUEUED
+    progress: float = 0.0  # 0-100
+    current_frame: int = 0
+    total_frames: int = 1
+    eta_seconds: Optional[float] = None
+    error: Optional[str] = None
+    # Source info
+    source_video_id: str
+    source_width: int
+    source_height: int
+    source_fps: int
+    source_duration: float
+    # Upscale config
+    model: str
+    scale_factor: int
+    target_width: int
+    target_height: int
+    # Result
+    video: Optional[VideoResult] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class UpscaleJobResponse(BaseModel):
+    """Response when creating an upscale job."""
+    job_id: str
+    status: str
+    message: str
+    eta_seconds: Optional[float] = None
+
+
+class UpscaleJobListResponse(BaseModel):
+    """Response listing upscale jobs."""
+    jobs: list[UpscaleJob]
