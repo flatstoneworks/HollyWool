@@ -85,6 +85,7 @@ from ..services.lora_manager import get_lora_manager
 from ..services.resources import check_resources_for_video, get_system_resources
 from ..services.upscale_jobs import get_upscale_job_manager
 from ..services.upscaler import get_upscaler_service
+from .settings import add_log, update_log, RequestLog
 
 router = APIRouter(prefix="/api", tags=["generate"])
 
@@ -289,6 +290,27 @@ async def create_job(request: GenerateRequest):
     job_manager = get_job_manager()
     job = job_manager.create_job(request)
 
+    # Log the request
+    log_entry = RequestLog(
+        id=job.id,
+        timestamp=datetime.now().isoformat(),
+        type="image",
+        prompt=request.prompt,
+        negative_prompt=request.negative_prompt,
+        model=request.model,
+        parameters={
+            "width": request.width or 1024,
+            "height": request.height or 1024,
+            "steps": request.steps,
+            "guidance_scale": request.guidance_scale,
+            "seed": request.seed,
+            "num_images": request.num_images or 1,
+            "loras": [{"lora_id": l.lora_id, "weight": l.weight} for l in (request.loras or [])],
+        },
+        status="pending",
+    )
+    add_log(log_entry)
+
     return JobResponse(
         job_id=job.id,
         status=job.status,
@@ -363,6 +385,27 @@ async def create_video_job(request: VideoGenerateRequest):
 
     video_job_manager = get_video_job_manager()
     job = video_job_manager.create_job(request)
+
+    # Log the request
+    log_entry = RequestLog(
+        id=job.id,
+        timestamp=datetime.now().isoformat(),
+        type="video",
+        prompt=request.prompt,
+        negative_prompt=request.negative_prompt,
+        model=request.model,
+        parameters={
+            "width": request.width or 768,
+            "height": request.height or 512,
+            "num_frames": request.num_frames or 97,
+            "fps": request.fps or 24,
+            "steps": request.steps,
+            "guidance_scale": request.guidance_scale,
+            "seed": request.seed,
+        },
+        status="pending",
+    )
+    add_log(log_entry)
 
     return VideoJobResponse(
         job_id=job.id,
@@ -524,6 +567,28 @@ async def create_i2v_job(request: I2VGenerateRequest):
     try:
         i2v_job_manager = get_i2v_job_manager()
         job = i2v_job_manager.create_job(request)
+
+        # Log the request
+        log_entry = RequestLog(
+            id=job.id,
+            timestamp=datetime.now().isoformat(),
+            type="i2v",
+            prompt=request.prompt or "Image-to-Video",
+            negative_prompt=request.negative_prompt,
+            model=request.model,
+            parameters={
+                "width": request.width,
+                "height": request.height,
+                "num_frames": request.num_frames or 24,
+                "fps": request.fps or 6,
+                "motion_bucket_id": request.motion_bucket_id,
+                "noise_aug_strength": request.noise_aug_strength,
+                "seed": request.seed,
+                "image_asset_id": request.image_asset_id,
+            },
+            status="pending",
+        )
+        add_log(log_entry)
 
         return I2VJobResponse(
             job_id=job.id,

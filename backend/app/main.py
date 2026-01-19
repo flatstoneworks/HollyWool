@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .routers import generate, assets
+from .routers import generate, assets, providers, settings
 
 
 def load_config() -> dict:
@@ -39,6 +39,8 @@ app.mount("/outputs", StaticFiles(directory=str(outputs_dir)), name="outputs")
 # Include routers
 app.include_router(generate.router)
 app.include_router(assets.router)
+app.include_router(providers.router)
+app.include_router(settings.router)
 
 
 @app.get("/")

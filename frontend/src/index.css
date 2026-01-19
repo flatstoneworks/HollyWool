@@ -4,12 +4,12 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
+    --background: 0 0% 98%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
+    --primary: 217 91% 55%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
     --muted: 240 4.8% 95.9%;
@@ -20,8 +20,22 @@
     --destructive-foreground: 0 0% 98%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
+    --ring: 217 91% 55%;
     --radius: 0.75rem;
+
+    /* Custom colors for components */
+    --glass-bg: 0 0% 100%;
+    --glass-border: 240 5.9% 85%;
+    --pill-bg: 240 5.9% 92%;
+    --pill-bg-hover: 240 5.9% 88%;
+    --pill-text: 240 10% 20%;
+    --text-primary: 240 10% 10%;
+    --text-secondary: 240 5% 40%;
+    --text-tertiary: 240 5% 55%;
+    --hover-bg: 240 5% 92%;
+    --active-bg: 240 5% 88%;
+    --scrollbar-thumb: 240 5% 80%;
+    --scrollbar-thumb-hover: 240 5% 70%;
   }
 
   .dark {
@@ -42,6 +56,20 @@
     --border: 0 0% 15%;
     --input: 0 0% 12%;
     --ring: 217 91% 60%;
+
+    /* Custom colors for components */
+    --glass-bg: 0 0% 0%;
+    --glass-border: 0 0% 100%;
+    --pill-bg: 0 0% 100%;
+    --pill-bg-hover: 0 0% 100%;
+    --pill-text: 0 0% 100%;
+    --text-primary: 0 0% 95%;
+    --text-secondary: 0 0% 70%;
+    --text-tertiary: 0 0% 50%;
+    --hover-bg: 0 0% 100%;
+    --active-bg: 0 0% 100%;
+    --scrollbar-thumb: 0 0% 100%;
+    --scrollbar-thumb-hover: 0 0% 100%;
   }
 }
 
@@ -56,60 +84,138 @@
 }
 
 @layer components {
+  /* Glass effect - light mode uses subtle shadow, dark mode uses blur */
   .glass {
-    @apply bg-black/40 backdrop-blur-xl border border-white/10;
+    @apply backdrop-blur-xl border;
+    background-color: hsl(var(--glass-bg) / 0.8);
+    border-color: hsl(var(--glass-border) / 0.1);
   }
 
+  .dark .glass {
+    background-color: hsl(var(--glass-bg) / 0.4);
+    border-color: hsl(var(--glass-border) / 0.1);
+  }
+
+  /* Glass light variant for dropdowns */
   .glass-light {
-    @apply bg-[#1a1a1a] backdrop-blur-md border border-white/10;
+    @apply backdrop-blur-md border;
+    background-color: hsl(var(--card));
+    border-color: hsl(var(--border));
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05), 0 2px 4px -2px rgb(0 0 0 / 0.05);
   }
 
+  .dark .glass-light {
+    background-color: #1a1a1a;
+    border-color: hsl(var(--glass-border) / 0.1);
+    box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
+  }
+
+  /* Prompt input */
   .prompt-input {
     @apply bg-transparent border-0 focus:ring-0 focus:outline-none resize-none;
-    @apply text-white placeholder:text-white/40;
+    color: hsl(var(--text-primary));
   }
 
+  .prompt-input::placeholder {
+    color: hsl(var(--text-tertiary));
+  }
+
+  /* Model/option pill buttons */
   .model-pill {
     @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-full;
-    @apply bg-white/10 hover:bg-white/15 transition-colors cursor-pointer;
-    @apply text-sm font-medium text-white/90;
+    @apply transition-colors cursor-pointer;
+    @apply text-sm font-medium;
+    background-color: hsl(var(--pill-bg) / 0.1);
+    color: hsl(var(--pill-text) / 0.9);
   }
 
+  .model-pill:hover {
+    background-color: hsl(var(--pill-bg-hover) / 0.15);
+  }
+
+  .dark .model-pill {
+    background-color: hsl(var(--pill-bg) / 0.1);
+    color: hsl(var(--pill-text) / 0.9);
+  }
+
+  .dark .model-pill:hover {
+    background-color: hsl(var(--pill-bg-hover) / 0.15);
+  }
+
+  /* Aspect ratio buttons */
   .aspect-btn {
     @apply p-2 rounded-lg transition-all duration-200;
-    @apply text-white/40 hover:text-white/70 hover:bg-white/5;
+    color: hsl(var(--text-tertiary));
+  }
+
+  .aspect-btn:hover {
+    color: hsl(var(--text-secondary));
+    background-color: hsl(var(--hover-bg) / 0.5);
   }
 
   .aspect-btn.active {
-    @apply text-white bg-white/10;
+    color: hsl(var(--text-primary));
+    background-color: hsl(var(--active-bg) / 0.8);
   }
 
+  .dark .aspect-btn {
+    color: hsl(var(--text-tertiary));
+  }
+
+  .dark .aspect-btn:hover {
+    color: hsl(var(--text-secondary));
+    background-color: hsl(var(--hover-bg) / 0.05);
+  }
+
+  .dark .aspect-btn.active {
+    color: hsl(var(--text-primary));
+    background-color: hsl(var(--active-bg) / 0.1);
+  }
+
+  /* Generate button */
   .generate-btn {
     @apply px-6 py-2.5 rounded-full font-medium transition-all duration-200;
-    @apply bg-primary hover:bg-primary/90 text-white;
+    @apply bg-primary hover:bg-primary/90 text-primary-foreground;
     @apply disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
+  /* History/session items */
   .history-item {
     @apply flex gap-3 p-2 rounded-xl transition-colors cursor-pointer;
-    @apply hover:bg-white/5;
+  }
+
+  .history-item:hover {
+    background-color: hsl(var(--hover-bg) / 0.5);
   }
 
   .history-item.active {
-    @apply bg-white/10;
+    background-color: hsl(var(--active-bg) / 0.8);
   }
 
-  /* Card container - takes full width, images scale with browser */
+  .dark .history-item:hover {
+    background-color: hsl(var(--hover-bg) / 0.05);
+  }
+
+  .dark .history-item.active {
+    background-color: hsl(var(--active-bg) / 0.1);
+  }
+
+  /* Card container */
   .card-container {
-    @apply w-full;
+    @apply w-full border;
+    border-color: hsl(var(--border));
     transition: all 0.2s ease;
   }
 
   .card-container:hover {
-    @apply border-white/20;
+    border-color: hsl(var(--border) / 0.8);
   }
 
-  /* Ensure images in cards scale smoothly */
+  .dark .card-container:hover {
+    border-color: hsl(var(--glass-border) / 0.2);
+  }
+
+  /* Card container images */
   .card-container img {
     @apply transition-all duration-200;
   }
@@ -118,20 +224,41 @@
 @layer utilities {
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgba(255,255,255,0.1) transparent;
   }
+
+  /* Light mode scrollbar */
+  .scrollbar-thin {
+    scrollbar-color: hsl(var(--scrollbar-thumb)) transparent;
+  }
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 4px;
     height: 4px;
   }
+
   .scrollbar-thin::-webkit-scrollbar-track {
     background: transparent;
   }
+
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: rgba(255,255,255,0.1);
+    background-color: hsl(var(--scrollbar-thumb));
     border-radius: 2px;
   }
+
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--scrollbar-thumb-hover));
+  }
+
+  /* Dark mode scrollbar */
+  .dark .scrollbar-thin {
+    scrollbar-color: rgba(255,255,255,0.1) transparent;
+  }
+
+  .dark .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: rgba(255,255,255,0.1);
+  }
+
+  .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     background-color: rgba(255,255,255,0.2);
   }
 }

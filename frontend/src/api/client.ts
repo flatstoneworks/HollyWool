@@ -91,6 +91,9 @@ export interface Asset {
   seed: number
   batch_id?: string
   created_at: string
+  // File info
+  file_size?: number  // Size in bytes
+  file_path?: string  // Full path on disk
 }
 
 export interface AssetsResponse {
@@ -163,6 +166,61 @@ export interface Session {
 export interface SessionsData {
   sessions: Session[]
   currentSessionId: string | null
+}
+
+// Video session types
+export interface VideoSession {
+  id: string
+  name: string
+  createdAt: string
+  thumbnail?: string
+  isAutoNamed?: boolean
+}
+
+export interface VideoSessionsData {
+  sessions: VideoSession[]
+  currentSessionId: string | null
+}
+
+// Settings types
+export type ThemeOption = 'light' | 'dark' | 'system'
+
+export interface AppSettings {
+  theme: ThemeOption
+  default_model: string | null
+  default_video_model: string | null
+  auto_save_history: boolean
+  max_log_entries: number
+}
+
+export interface RequestLog {
+  id: string
+  timestamp: string
+  type: 'image' | 'video' | 'i2v'
+  prompt: string
+  negative_prompt: string | null
+  model: string
+  parameters: Record<string, unknown>
+  status: 'pending' | 'generating' | 'completed' | 'failed'
+  duration_ms: number | null
+  error: string | null
+  result_id: string | null
+}
+
+export interface RequestLogsResponse {
+  logs: RequestLog[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface SystemInfo {
+  version: string
+  cuda_available: boolean
+  gpu_name: string | null
+  gpu_memory_gb: number | null
+  python_version: string
+  torch_version: string | null
 }
 
 // Job types
@@ -336,6 +394,9 @@ export interface VideoAsset {
   fps: number
   duration: number
   created_at: string
+  // File info
+  file_size?: number  // Size in bytes
+  file_path?: string  // Full path on disk
 }
 
 export interface VideoAssetsResponse {
@@ -486,6 +547,32 @@ export interface UpscaleJobListResponse {
   jobs: UpscaleJob[]
 }
 
+// ============== Provider Types ==============
+
+export interface ProviderConfig {
+  provider: string
+  is_configured: boolean
+  is_enabled: boolean
+  api_url: string | null
+  has_api_key: boolean
+}
+
+export interface AllProvidersResponse {
+  providers: Record<string, ProviderConfig>
+}
+
+export interface ProviderConfigRequest {
+  api_key?: string
+  api_url?: string
+  is_enabled?: boolean
+}
+
+export interface TestConnectionResponse {
+  success: boolean
+  message: string
+  error?: string
+}
+
 export const api = {
   async health(): Promise<HealthResponse> {
     const res = await fetch(`${API_BASE}/health`)
@@ -592,6 +679,23 @@ export const api = {
       body: JSON.stringify(data),
     })
     if (!res.ok) throw new Error('Failed to save sessions')
+    return res.json()
+  },
+
+  // Video session endpoints
+  async getVideoSessions(): Promise<VideoSessionsData> {
+    const res = await fetch(`${API_BASE}/video-sessions`)
+    if (!res.ok) throw new Error('Failed to fetch video sessions')
+    return res.json()
+  },
+
+  async saveVideoSessions(data: VideoSessionsData): Promise<VideoSessionsData> {
+    const res = await fetch(`${API_BASE}/video-sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error('Failed to save video sessions')
     return res.json()
   },
 
@@ -783,6 +887,97 @@ export const api = {
     const url = `${API_BASE}/upscale/jobs${searchParams.toString() ? `?${searchParams}` : ''}`
     const res = await fetch(url)
     if (!res.ok) throw new Error('Failed to fetch upscale jobs')
+    return res.json()
+  },
+
+  // ============== Provider Endpoints ==============
+
+  async getProviders(): Promise<AllProvidersResponse> {
+    const res = await fetch(`${API_BASE}/providers`)
+    if (!res.ok) throw new Error('Failed to fetch providers')
+    return res.json()
+  },
+
+  async getProvider(providerId: string): Promise<ProviderConfig> {
+    const res = await fetch(`${API_BASE}/providers/${providerId}`)
+    if (!res.ok) throw new Error('Failed to fetch provider')
+    return res.json()
+  },
+
+  async updateProvider(providerId: string, config: ProviderConfigRequest): Promise<ProviderConfig> {
+    const res = await fetch(`${API_BASE}/providers/${providerId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    })
+    if (!res.ok) throw new Error('Failed to update provider')
+    return res.json()
+  },
+
+  async deleteProvider(providerId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/providers/${providerId}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error('Failed to delete provider config')
+  },
+
+  async testProviderConnection(providerId: string): Promise<TestConnectionResponse> {
+    const res = await fetch(`${API_BASE}/providers/${providerId}/test`, {
+      method: 'POST',
+    })
+    if (!res.ok) throw new Error('Failed to test provider connection')
+    return res.json()
+  },
+
+  // ============== Settings Endpoints ==============
+
+  async getSettings(): Promise<AppSettings> {
+    const res = await fetch(`${API_BASE}/settings`)
+    if (!res.ok) throw new Error('Failed to fetch settings')
+    return res.json()
+  },
+
+  async updateSettings(settings: AppSettings): Promise<AppSettings> {
+    const res = await fetch(`${API_BASE}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    })
+    if (!res.ok) throw new Error('Failed to update settings')
+    return res.json()
+  },
+
+  async getRequestLogs(params?: { page?: number; page_size?: number; type?: string; status?: string }): Promise<RequestLogsResponse> {
+    const searchParams = new URLSearchParams()
+    if (params?.page) searchParams.set('page', params.page.toString())
+    if (params?.page_size) searchParams.set('page_size', params.page_size.toString())
+    if (params?.type) searchParams.set('type', params.type)
+    if (params?.status) searchParams.set('status', params.status)
+    const url = `${API_BASE}/settings/logs${searchParams.toString() ? `?${searchParams}` : ''}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Failed to fetch request logs')
+    return res.json()
+  },
+
+  async getRequestLog(logId: string): Promise<RequestLog> {
+    const res = await fetch(`${API_BASE}/settings/logs/${logId}`)
+    if (!res.ok) throw new Error('Request log not found')
+    return res.json()
+  },
+
+  async clearRequestLogs(): Promise<void> {
+    const res = await fetch(`${API_BASE}/settings/logs`, { method: 'DELETE' })
+    if (!res.ok) throw new Error('Failed to clear request logs')
+  },
+
+  async deleteRequestLog(logId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/settings/logs/${logId}`, { method: 'DELETE' })
+    if (!res.ok) throw new Error('Failed to delete request log')
+  },
+
+  async getSystemInfo(): Promise<SystemInfo> {
+    const res = await fetch(`${API_BASE}/settings/system`)
+    if (!res.ok) throw new Error('Failed to fetch system info')
     return res.json()
   },
 }

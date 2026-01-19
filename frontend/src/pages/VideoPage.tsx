@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
   Sparkles, ChevronDown, Palette, X, Wand2,
   Plus, MessageSquare, MoreHorizontal, Pencil, GripVertical, Trash2, Square, Monitor,
@@ -11,6 +13,7 @@ import {
   type VideoSession
 } from '@/lib/video-sessions'
 import { api, VideoJob, VideoGenerateRequest, I2VJob, I2VGenerateRequest } from '@/api/client'
+import { PREVIEW_MODELS, PROVIDER_PRESETS, type ModelProvider } from '@/types/providers'
 
 type AspectRatio = '16:9' | '9:16' | '1:1'
 type Resolution = '720p' | '1080p'
@@ -103,6 +106,18 @@ const MAX_SIDEBAR_WIDTH = 400
 const DEFAULT_SIDEBAR_WIDTH = 256
 
 export function VideoPage() {
+  // Fetch configured providers
+  const { data: providersData } = useQuery({
+    queryKey: ['providers'],
+    queryFn: api.getProviders,
+  })
+
+  // Get configured remote providers with video models
+  const configuredVideoProviders = Object.entries(providersData?.providers || {})
+    .filter(([_, config]) => config.is_configured && config.is_enabled)
+    .map(([providerId]) => providerId as ModelProvider)
+    .filter(providerId => PREVIEW_MODELS[providerId]?.some(m => m.type === 'video'))
+
   const [prompt, setPrompt] = useState('')
   const [selectedModel, setSelectedModel] = useState<string>('ltx-2')
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9')
@@ -132,13 +147,33 @@ export function VideoPage() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Helper to close all dropdown menus
-  const closeAllMenus = useCallback(() => {
-    setShowModelMenu(false)
-    setShowStyleMenu(false)
-    setShowAspectMenu(false)
-    setShowResolutionMenu(false)
-  }, [])
+  // Dropdown refs for click-outside detection
+  const modelMenuRef = useRef<HTMLDivElement>(null)
+  const styleMenuRef = useRef<HTMLDivElement>(null)
+  const aspectMenuRef = useRef<HTMLDivElement>(null)
+  const resolutionMenuRef = useRef<HTMLDivElement>(null)
+
+  // Click-outside detection for dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (showModelMenu && modelMenuRef.current && !modelMenuRef.current.contains(target)) {
+        setShowModelMenu(false)
+      }
+      if (showStyleMenu && styleMenuRef.current && !styleMenuRef.current.contains(target)) {
+        setShowStyleMenu(false)
+      }
+      if (showAspectMenu && aspectMenuRef.current && !aspectMenuRef.current.contains(target)) {
+        setShowAspectMenu(false)
+      }
+      if (showResolutionMenu && resolutionMenuRef.current && !resolutionMenuRef.current.contains(target)) {
+        setShowResolutionMenu(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showModelMenu, showStyleMenu, showAspectMenu, showResolutionMenu])
 
   // Video generation state - track jobs by ID like ImagePage
   const [activeJobs, setActiveJobs] = useState<Record<string, VideoJob>>({})
@@ -155,9 +190,12 @@ export function VideoPage() {
 
   // Initialize video sessions (separate from image sessions)
   useEffect(() => {
-    const session = ensureCurrentVideoSession()
-    setCurrentSession(session)
-    setSessions(getVideoSessions())
+    const initSessions = async () => {
+      const session = await ensureCurrentVideoSession()
+      setCurrentSession(session)
+      setSessions(getVideoSessions())
+    }
+    initSessions()
   }, [])
 
   // Helper to get dimensions from aspect ratio and resolution
@@ -562,12 +600,12 @@ export function VideoPage() {
       <aside
         ref={sidebarRef}
         style={{ width: sidebarWidth }}
-        className="h-full border-r border-white/5 flex flex-col bg-black/20 relative flex-shrink-0"
+        className="h-full border-r border-border flex flex-col bg-muted/50 dark:bg-black/20 relative flex-shrink-0"
       >
-        <div className="p-3 border-b border-white/5 flex-shrink-0">
+        <div className="p-3 border-b border-border flex-shrink-0">
           <button
             onClick={handleNewSession}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white text-sm font-medium transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-foreground text-sm font-medium transition-colors"
           >
             <Plus className="h-4 w-4" />
             New Session
@@ -581,8 +619,8 @@ export function VideoPage() {
               className={cn(
                 'group relative rounded-lg transition-colors cursor-pointer',
                 currentSession?.id === session.id
-                  ? 'bg-white/10'
-                  : 'hover:bg-white/5'
+                  ? 'bg-accent'
+                  : 'hover:bg-muted'
               )}
             >
               {editingSessionId === session.id ? (
@@ -592,7 +630,7 @@ export function VideoPage() {
                   onChange={(e) => setEditingName(e.target.value)}
                   onBlur={() => handleRenameSession(session.id)}
                   onKeyDown={(e) => e.key === 'Enter' && handleRenameSession(session.id)}
-                  className="w-full px-3 py-2 bg-transparent text-sm text-white outline-none"
+                  className="w-full px-3 py-2 bg-transparent text-sm text-foreground outline-none"
                   autoFocus
                 />
               ) : (
@@ -601,7 +639,7 @@ export function VideoPage() {
                   className="flex items-center gap-2 px-2 py-2"
                 >
                   {session.thumbnail ? (
-                    <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0 bg-white/5">
+                    <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0 bg-muted">
                       {session.thumbnail.endsWith('.mp4') ? (
                         <video src={session.thumbnail} className="w-full h-full object-cover" muted />
                       ) : (
@@ -609,43 +647,43 @@ export function VideoPage() {
                       )}
                     </div>
                   ) : (
-                    <div className="w-8 h-8 rounded flex-shrink-0 bg-white/5 flex items-center justify-center">
-                      <MessageSquare className="h-4 w-4 text-white/30" />
+                    <div className="w-8 h-8 rounded flex-shrink-0 bg-muted flex items-center justify-center">
+                      <MessageSquare className="h-4 w-4 text-muted-foreground/50" />
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm text-white/80 truncate block">{session.name}</span>
+                    <span className="text-sm text-foreground/80 truncate block">{session.name}</span>
                   </div>
                   <button
                     onClick={(e) => {
                       e.stopPropagation()
                       setSessionMenuId(sessionMenuId === session.id ? null : session.id)
                     }}
-                    className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 transition-all"
+                    className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-all"
                   >
-                    <MoreHorizontal className="h-4 w-4 text-white/40" />
+                    <MoreHorizontal className="h-4 w-4 text-muted-foreground/70" />
                   </button>
                 </div>
               )}
 
               {sessionMenuId === session.id && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setSessionMenuId(null)} />
-                  <div className="absolute right-0 top-full mt-1 w-36 py-1 rounded-lg bg-[#1a1a1a] border border-white/10 shadow-xl z-50">
+                  <div className="fixed inset-0 z-50" onClick={() => setSessionMenuId(null)} />
+                  <div className="absolute right-0 top-full mt-1 w-36 py-1 rounded-lg bg-[#1a1a1a] border border-white/10 shadow-xl z-[60]">
                     <button
                       onClick={() => {
                         setEditingSessionId(session.id)
                         setEditingName(session.name)
                         setSessionMenuId(null)
                       }}
-                      className="w-full px-3 py-1.5 text-left text-sm text-white/80 hover:bg-white/10 flex items-center gap-2"
+                      className="w-full px-3 py-1.5 text-left text-sm text-foreground/80 hover:bg-accent flex items-center gap-2"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                       Rename
                     </button>
                     <button
                       onClick={() => handleDeleteSession(session.id)}
-                      className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-white/10 flex items-center gap-2"
+                      className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-accent flex items-center gap-2"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       Delete
@@ -667,7 +705,7 @@ export function VideoPage() {
           )}
         >
           <div className="absolute right-0 top-1/2 -translate-y-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <GripVertical className="h-6 w-6 text-white/30" />
+            <GripVertical className="h-6 w-6 text-muted-foreground/50" />
           </div>
         </div>
       </aside>
@@ -698,8 +736,8 @@ export function VideoPage() {
                 <div className="flex items-center gap-4 mb-4">
                   <Loader2 className="h-6 w-6 text-primary animate-spin" />
                   <div>
-                    <p className="text-white font-medium">Generating video...</p>
-                    <p className="text-sm text-white/60 capitalize">
+                    <p className="text-foreground font-medium">Generating video...</p>
+                    <p className="text-sm text-muted-foreground capitalize">
                       {job.status.replace('_', ' ')}
                       {job.download_progress > 0 && job.status === 'downloading' && (
                         <span> - {Math.round(job.download_progress)}%</span>
@@ -709,7 +747,7 @@ export function VideoPage() {
                 </div>
 
                 {/* Progress bar */}
-                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-2 bg-accent rounded-full overflow-hidden">
                   <div
                     className="h-full bg-primary transition-all duration-300"
                     style={{ width: `${job.progress}%` }}
@@ -717,12 +755,12 @@ export function VideoPage() {
                 </div>
 
                 {job.eta_seconds && job.eta_seconds > 0 && (
-                  <p className="text-xs text-white/40 mt-2">
+                  <p className="text-xs text-muted-foreground/70 mt-2">
                     Estimated time: {Math.ceil(job.eta_seconds / 60)} min
                   </p>
                 )}
 
-                <p className="text-xs text-white/40 mt-2 truncate">
+                <p className="text-xs text-muted-foreground/70 mt-2 truncate">
                   "{job.prompt}"
                 </p>
               </div>
@@ -734,8 +772,8 @@ export function VideoPage() {
                 <div className="flex items-center gap-4 mb-4">
                   <Loader2 className="h-6 w-6 text-primary animate-spin" />
                   <div className="flex-1">
-                    <p className="text-white font-medium">Animating image...</p>
-                    <p className="text-sm text-white/60 capitalize">
+                    <p className="text-foreground font-medium">Animating image...</p>
+                    <p className="text-sm text-muted-foreground capitalize">
                       {job.status.replace('_', ' ')}
                       {job.download_progress && job.download_progress > 0 && job.status === 'downloading' && (
                         <span> - {Math.round(job.download_progress)}%</span>
@@ -752,7 +790,7 @@ export function VideoPage() {
                 </div>
 
                 {/* Progress bar */}
-                <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-2 bg-accent rounded-full overflow-hidden">
                   <div
                     className="h-full bg-primary transition-all duration-300"
                     style={{ width: `${job.progress}%` }}
@@ -760,12 +798,12 @@ export function VideoPage() {
                 </div>
 
                 {job.eta_seconds && job.eta_seconds > 0 && (
-                  <p className="text-xs text-white/40 mt-2">
+                  <p className="text-xs text-muted-foreground/70 mt-2">
                     Estimated time: {Math.ceil(job.eta_seconds / 60)} min
                   </p>
                 )}
 
-                <p className="text-xs text-white/40 mt-2 truncate">
+                <p className="text-xs text-muted-foreground/70 mt-2 truncate">
                   "{job.prompt}"
                 </p>
               </div>
@@ -786,8 +824,8 @@ export function VideoPage() {
                         />
                       </div>
                       <div className="p-4">
-                        <p className="text-sm text-white/80 mb-2 line-clamp-2">{job.prompt}</p>
-                        <div className="flex items-center justify-between text-xs text-white/40">
+                        <p className="text-sm text-foreground/80 mb-2 line-clamp-2">{job.prompt}</p>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground/70">
                           <div className="flex items-center gap-2">
                             <span>{job.video.width}x{job.video.height} • {job.video.duration.toFixed(1)}s • {job.video.fps}fps</span>
                             {job.video.has_audio && (
@@ -800,7 +838,7 @@ export function VideoPage() {
                             <a
                               href={job.video.url}
                               download={job.video.filename}
-                              className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                              className="p-2 rounded-lg hover:bg-accent transition-colors"
                               title="Download video"
                             >
                               <Download className="h-4 w-4" />
@@ -820,10 +858,10 @@ export function VideoPage() {
                 {completedI2VJobs.map((job) => (
                   job.video && (
                     <div key={job.id} className="rounded-xl glass overflow-hidden">
-                      <div className="flex items-start gap-4 p-4 border-b border-white/5">
+                      <div className="flex items-start gap-4 p-4 border-b border-border">
                         {job.source_image_url && (
                           <div className="flex-shrink-0">
-                            <p className="text-[10px] text-white/40 mb-1">Source</p>
+                            <p className="text-[10px] text-muted-foreground/70 mb-1">Source</p>
                             <img
                               src={job.source_image_url}
                               alt="Source"
@@ -832,8 +870,8 @@ export function VideoPage() {
                           </div>
                         )}
                         <div className="flex items-center flex-1">
-                          <ImageIcon className="h-4 w-4 text-white/40 mr-2" />
-                          <span className="text-xs text-white/40">Image to Video</span>
+                          <ImageIcon className="h-4 w-4 text-muted-foreground/70 mr-2" />
+                          <span className="text-xs text-muted-foreground/70">Image to Video</span>
                         </div>
                       </div>
                       <div className="relative aspect-video bg-black">
@@ -845,13 +883,13 @@ export function VideoPage() {
                         />
                       </div>
                       <div className="p-4">
-                        <p className="text-sm text-white/80 mb-2 line-clamp-2">{job.prompt}</p>
-                        <div className="flex items-center justify-between text-xs text-white/40">
+                        <p className="text-sm text-foreground/80 mb-2 line-clamp-2">{job.prompt}</p>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground/70">
                           <span>{job.video.width}x{job.video.height} • {job.video.duration.toFixed(1)}s • {job.video.fps}fps</span>
                           <a
                             href={job.video.url}
                             download={job.video.filename}
-                            className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                            className="p-2 rounded-lg hover:bg-accent transition-colors"
                             title="Download video"
                           >
                             <Download className="h-4 w-4" />
@@ -873,14 +911,14 @@ export function VideoPage() {
                       <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-red-300">Generation failed</p>
-                        <p className="text-xs text-white/60 mt-1 truncate">"{job.prompt}"</p>
+                        <p className="text-xs text-muted-foreground mt-1 truncate">"{job.prompt}"</p>
                         {job.error && (
                           <p className="text-xs text-red-300/80 mt-2 line-clamp-3">{job.error}</p>
                         )}
                       </div>
                       <button
                         onClick={() => setFailedJobs(prev => prev.filter(j => j.id !== job.id))}
-                        className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                        className="p-1 rounded hover:bg-accent text-muted-foreground/70 hover:text-foreground transition-colors"
                         title="Dismiss"
                       >
                         <X className="h-4 w-4" />
@@ -900,14 +938,14 @@ export function VideoPage() {
                       <AlertCircle className="h-5 w-5 text-red-400 flex-shrink-0 mt-0.5" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-red-300">I2V generation failed</p>
-                        <p className="text-xs text-white/60 mt-1 truncate">"{job.prompt}"</p>
+                        <p className="text-xs text-muted-foreground mt-1 truncate">"{job.prompt}"</p>
                         {job.error && (
                           <p className="text-xs text-red-300/80 mt-2 line-clamp-3">{job.error}</p>
                         )}
                       </div>
                       <button
                         onClick={() => setFailedI2VJobs(prev => prev.filter(j => j.id !== job.id))}
-                        className="p-1 rounded hover:bg-white/10 text-white/40 hover:text-white transition-colors"
+                        className="p-1 rounded hover:bg-accent text-muted-foreground/70 hover:text-foreground transition-colors"
                         title="Dismiss"
                       >
                         <X className="h-4 w-4" />
@@ -923,11 +961,11 @@ export function VideoPage() {
              currentSessionActiveJobs.length === 0 && currentSessionActiveI2VJobs.length === 0 &&
              failedJobs.length === 0 && failedI2VJobs.length === 0 && (
               <div className="text-center py-20">
-                <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-6">
-                  <Sparkles className="h-10 w-10 text-white/20" />
+                <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center mx-auto mb-6">
+                  <Sparkles className="h-10 w-10 text-foreground/20" />
                 </div>
-                <h2 className="text-xl font-medium text-white/80 mb-2">Create a video</h2>
-                <p className="text-white/40 max-w-md mx-auto">
+                <h2 className="text-xl font-medium text-foreground/80 mb-2">Create a video</h2>
+                <p className="text-muted-foreground/70 max-w-md mx-auto">
                   Describe what you want to see and generate AI videos
                 </p>
               </div>
@@ -937,7 +975,7 @@ export function VideoPage() {
 
         {/* Fixed Bottom Prompt Bar */}
         <div
-          className="fixed bottom-0 right-0 p-4 z-40 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d] to-transparent pt-12"
+          className="fixed bottom-0 right-0 p-4 z-40 bg-gradient-to-t from-background via-background to-transparent pt-12"
           style={{ left: sidebarWidth }}
         >
           <div className="max-w-3xl mx-auto">
@@ -945,13 +983,9 @@ export function VideoPage() {
               {/* Top row - Options */}
               <div className="flex items-center gap-2 mb-3 px-1 flex-wrap">
                 {/* Model Selector */}
-                <div className="relative">
+                <div className="relative" ref={modelMenuRef}>
                   <button
-                    onClick={() => {
-                      const isOpen = !showModelMenu
-                      closeAllMenus()
-                      setShowModelMenu(isOpen)
-                    }}
+                    onClick={() => setShowModelMenu(!showModelMenu)}
                     className="model-pill"
                   >
                     {selectedModelInfo.supportsI2V && <ImageIcon className="h-3.5 w-3.5 text-primary" />}
@@ -961,53 +995,116 @@ export function VideoPage() {
                   </button>
 
                   {showModelMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={closeAllMenus} />
-                      <div className="absolute bottom-full left-0 mb-2 w-64 py-1 rounded-xl glass-light shadow-xl z-50">
-                        {videoModels.map((model) => (
-                          <button
-                            key={model.id}
-                            onClick={() => {
-                              setSelectedModel(model.id)
-                              setShowModelMenu(false)
-                            }}
-                            className={cn(
-                              'w-full px-3 py-2 text-left text-sm transition-colors',
-                              'hover:bg-white/10',
-                              selectedModel === model.id && 'text-primary'
-                            )}
-                          >
-                            <div className="flex items-center gap-2">
-                              {model.supportsI2V && <ImageIcon className="h-4 w-4 text-primary flex-shrink-0" />}
-                              <div className="flex-1">
-                                <div className="flex items-center justify-between">
-                                  <div className="font-medium">{model.name}</div>
-                                  {model.requiresApproval && (
-                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
-                                      Approval
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="text-xs text-white/40 mt-0.5">
-                                  {model.description}
+                    <div className="absolute bottom-full left-0 mb-2 w-72 rounded-xl glass-light shadow-xl z-[60] flex flex-col">
+                        {/* Scrollable model list */}
+                        <div className="max-h-72 overflow-y-auto scrollbar-thin py-1">
+                          {/* Local Models Section */}
+                          <div className="px-3 py-1.5 text-[10px] font-medium text-amber-400/70 uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400/70" />
+                            Local Video Models
+                          </div>
+                          {videoModels.map((model) => (
+                            <button
+                              key={model.id}
+                              onClick={() => {
+                                setSelectedModel(model.id)
+                                setShowModelMenu(false)
+                              }}
+                              className={cn(
+                                'w-full px-3 py-2 text-left text-sm transition-colors',
+                                'hover:bg-accent',
+                                selectedModel === model.id && 'bg-muted'
+                              )}
+                            >
+                              <div className="flex items-center gap-2">
+                                {model.supportsI2V && <ImageIcon className="h-4 w-4 text-primary flex-shrink-0" />}
+                                <div className="flex-1">
+                                  <div className="flex items-center justify-between">
+                                    <div className={cn(
+                                      'font-medium',
+                                      selectedModel === model.id && 'text-primary'
+                                    )}>{model.name}</div>
+                                    {model.requiresApproval && (
+                                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">
+                                        Approval
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground/70 mt-0.5">
+                                    {model.description}
+                                  </div>
                                 </div>
                               </div>
+                            </button>
+                          ))}
+
+                          {/* Remote Models Section */}
+                          <div className="px-3 py-1.5 mt-2 text-[10px] font-medium text-blue-400/70 uppercase tracking-wider flex items-center gap-1.5 border-t border-border pt-3">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-400/70" />
+                            Remote Models
+                          </div>
+                          {configuredVideoProviders.length > 0 ? (
+                            configuredVideoProviders.map(providerId => {
+                              const providerModels = PREVIEW_MODELS[providerId]?.filter(m => m.type === 'video') || []
+                              const providerName = PROVIDER_PRESETS[providerId]?.name || providerId
+                              if (providerModels.length === 0) return null
+                              return (
+                                <div key={providerId}>
+                                  <div className="px-3 py-1 text-[10px] text-blue-400/50 uppercase">
+                                    {providerName}
+                                  </div>
+                                  {providerModels.map(model => (
+                                    <button
+                                      key={model.id}
+                                      onClick={() => {
+                                        setSelectedModel(model.id)
+                                        setShowModelMenu(false)
+                                      }}
+                                      className={cn(
+                                        'w-full px-3 py-2 text-left text-sm transition-colors',
+                                        'hover:bg-accent',
+                                        selectedModel === model.id && 'bg-muted'
+                                      )}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className={cn(
+                                          'font-medium truncate',
+                                          selectedModel === model.id && 'text-primary'
+                                        )}>
+                                          {model.name}
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-muted-foreground/70 mt-0.5">
+                                        {model.description}
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              )
+                            })
+                          ) : (
+                            <div className="px-3 py-2 text-xs text-muted-foreground/50 italic">
+                              Configure API providers in Models page
                             </div>
-                          </button>
-                        ))}
+                          )}
+                        </div>
+                        {/* Add model link */}
+                        <Link
+                          to="/models"
+                          onClick={() => setShowModelMenu(false)}
+                          className="flex items-center gap-2 px-3 py-2.5 text-sm text-primary hover:bg-accent transition-colors border-t border-white/10"
+                        >
+                          <Plus className="h-4 w-4" />
+                          <span>Browse all models</span>
+                        </Link>
                       </div>
-                    </>
                   )}
                 </div>
 
                 {/* Style Selector */}
-                <div className="relative">
+                <div className="relative" ref={styleMenuRef}>
                   <button
-                    onClick={() => {
-                      const isOpen = !showStyleMenu
-                      closeAllMenus()
-                      setShowStyleMenu(isOpen)
-                    }}
+                    onClick={() => setShowStyleMenu(!showStyleMenu)}
                     className={cn(
                       'model-pill',
                       selectedStyle !== 'none' && 'bg-primary/20 text-primary'
@@ -1019,40 +1116,33 @@ export function VideoPage() {
                   </button>
 
                   {showStyleMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={closeAllMenus} />
-                      <div className="absolute bottom-full left-0 mb-2 w-48 py-1 rounded-xl glass-light shadow-xl z-50">
-                        {stylePresets.map((style) => (
-                          <button
-                            key={style.id}
-                            onClick={() => {
-                              setSelectedStyle(style.id)
-                              setShowStyleMenu(false)
-                            }}
-                            className={cn(
-                              'w-full px-3 py-2 text-left text-sm transition-colors',
-                              'hover:bg-white/10',
-                              selectedStyle === style.id && 'text-primary'
-                            )}
-                          >
-                            {style.label}
-                          </button>
-                        ))}
-                      </div>
-                    </>
+                    <div className="absolute bottom-full left-0 mb-2 w-48 py-1 rounded-xl glass-light shadow-xl z-[60]">
+                      {stylePresets.map((style) => (
+                        <button
+                          key={style.id}
+                          onClick={() => {
+                            setSelectedStyle(style.id)
+                            setShowStyleMenu(false)
+                          }}
+                          className={cn(
+                            'w-full px-3 py-2 text-left text-sm transition-colors',
+                            'hover:bg-accent',
+                            selectedStyle === style.id && 'text-primary'
+                          )}
+                        >
+                          {style.label}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
 
-                <div className="h-5 w-px bg-white/10" />
+                <div className="h-5 w-px bg-accent" />
 
                 {/* Aspect Ratio Selector */}
-                <div className="relative">
+                <div className="relative" ref={aspectMenuRef}>
                   <button
-                    onClick={() => {
-                      const isOpen = !showAspectMenu
-                      closeAllMenus()
-                      setShowAspectMenu(isOpen)
-                    }}
+                    onClick={() => setShowAspectMenu(!showAspectMenu)}
                     className="model-pill"
                   >
                     <Square className="h-3.5 w-3.5" />
@@ -1061,41 +1151,34 @@ export function VideoPage() {
                   </button>
 
                   {showAspectMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={closeAllMenus} />
-                      <div className="absolute bottom-full left-0 mb-2 p-3 rounded-xl glass-light shadow-xl z-50">
-                        <div className="grid grid-cols-3 gap-2">
-                          {aspectRatios.map((ratio) => (
-                            <button
-                              key={ratio.value}
-                              onClick={() => {
-                                setAspectRatio(ratio.value)
-                                setShowAspectMenu(false)
-                              }}
-                              className={cn(
-                                'px-4 py-2 rounded-lg border text-sm font-medium transition-all',
-                                aspectRatio === ratio.value
-                                  ? 'border-white/40 bg-white/10 text-white'
-                                  : 'border-white/10 text-white/60 hover:border-white/20 hover:text-white/80'
-                              )}
-                            >
-                              {ratio.label}
-                            </button>
-                          ))}
-                        </div>
+                    <div className="absolute bottom-full left-0 mb-2 p-3 rounded-xl glass-light shadow-xl z-[60]">
+                      <div className="grid grid-cols-3 gap-2">
+                        {aspectRatios.map((ratio) => (
+                          <button
+                            key={ratio.value}
+                            onClick={() => {
+                              setAspectRatio(ratio.value)
+                              setShowAspectMenu(false)
+                            }}
+                            className={cn(
+                              'px-4 py-2 rounded-lg border text-sm font-medium transition-all',
+                              aspectRatio === ratio.value
+                                ? 'border-white/40 bg-accent text-foreground'
+                                : 'border-white/10 text-muted-foreground hover:border-white/20 hover:text-foreground/80'
+                            )}
+                          >
+                            {ratio.label}
+                          </button>
+                        ))}
                       </div>
-                    </>
+                    </div>
                   )}
                 </div>
 
                 {/* Resolution Selector */}
-                <div className="relative">
+                <div className="relative" ref={resolutionMenuRef}>
                   <button
-                    onClick={() => {
-                      const isOpen = !showResolutionMenu
-                      closeAllMenus()
-                      setShowResolutionMenu(isOpen)
-                    }}
+                    onClick={() => setShowResolutionMenu(!showResolutionMenu)}
                     className="model-pill"
                   >
                     <Monitor className="h-3.5 w-3.5" />
@@ -1104,27 +1187,24 @@ export function VideoPage() {
                   </button>
 
                   {showResolutionMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={closeAllMenus} />
-                      <div className="absolute bottom-full left-0 mb-2 w-32 py-1 rounded-xl glass-light shadow-xl z-50">
-                        {availableResolutions.map((res) => (
-                          <button
-                            key={res.value}
-                            onClick={() => {
-                              setResolution(res.value)
-                              setShowResolutionMenu(false)
-                            }}
-                            className={cn(
-                              'w-full px-3 py-2 text-left text-sm transition-colors',
-                              'hover:bg-white/10',
-                              resolution === res.value && 'text-primary'
-                            )}
-                          >
-                            {res.label}
-                          </button>
-                        ))}
-                      </div>
-                    </>
+                    <div className="absolute bottom-full left-0 mb-2 w-32 py-1 rounded-xl glass-light shadow-xl z-[60]">
+                      {availableResolutions.map((res) => (
+                        <button
+                          key={res.value}
+                          onClick={() => {
+                            setResolution(res.value)
+                            setShowResolutionMenu(false)
+                          }}
+                          className={cn(
+                            'w-full px-3 py-2 text-left text-sm transition-colors',
+                            'hover:bg-accent',
+                            resolution === res.value && 'text-primary'
+                          )}
+                        >
+                          {res.label}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
               </div>
@@ -1133,7 +1213,7 @@ export function VideoPage() {
               {selectedModelInfo.supportsI2V && (
                 <div className="mb-3 px-1">
                   {sourceImagePreview ? (
-                    <div className="flex items-center gap-3 p-3 rounded-xl bg-white/5">
+                    <div className="flex items-center gap-3 p-3 rounded-xl bg-muted">
                       <div className="relative">
                         <img
                           src={sourceImagePreview}
@@ -1148,14 +1228,14 @@ export function VideoPage() {
                         </button>
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm text-white/80">Source image ready</p>
-                        <p className="text-xs text-white/40 mt-1">This image will be animated</p>
+                        <p className="text-sm text-foreground/80">Source image ready</p>
+                        <p className="text-xs text-muted-foreground/70 mt-1">This image will be animated</p>
                       </div>
                     </div>
                   ) : (
                     <button
                       onClick={() => fileInputRef.current?.click()}
-                      className="w-full p-4 rounded-xl border-2 border-dashed border-white/20 hover:border-primary/50 transition-colors flex items-center justify-center gap-3 text-white/60 hover:text-white"
+                      className="w-full p-4 rounded-xl border-2 border-dashed border-white/20 hover:border-primary/50 transition-colors flex items-center justify-center gap-3 text-muted-foreground hover:text-foreground"
                     >
                       <Upload className="h-5 w-5" />
                       <span>Upload source image to animate</span>
@@ -1173,7 +1253,7 @@ export function VideoPage() {
 
               {/* Prompt input row */}
               <div className="flex items-end gap-3">
-                <div className="flex-1 bg-white/5 rounded-xl px-4 py-3">
+                <div className="flex-1 bg-muted rounded-xl px-4 py-3">
                   <textarea
                     ref={textareaRef}
                     placeholder={selectedModelInfo.supportsI2V

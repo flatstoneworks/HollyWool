@@ -136,11 +136,23 @@ export async function ensureCurrentSession(): Promise<Session> {
     await initSessions()
   }
 
+  // Try to use the current session from backend
   if (currentSessionIdCache) {
     const session = getSession(currentSessionIdCache)
     if (session) return session
   }
-  // No current session or it doesn't exist, create one
+
+  // If currentSessionId doesn't match but we have sessions, use the first one
+  // This prevents overwriting existing sessions when a new browser connects
+  if (sessionsCache.length > 0) {
+    const firstSession = sessionsCache[0]!
+    currentSessionIdCache = firstSession.id
+    // Only persist if we're changing the current session ID
+    persistSessions()
+    return firstSession
+  }
+
+  // Only create a new session if there are truly NO sessions
   return createSession()
 }
 

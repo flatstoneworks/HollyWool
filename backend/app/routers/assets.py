@@ -27,6 +27,20 @@ class SessionsData(BaseModel):
     currentSessionId: Optional[str] = None
 
 
+# Video session models
+class VideoSession(BaseModel):
+    id: str
+    name: str
+    createdAt: str
+    thumbnail: Optional[str] = None
+    isAutoNamed: Optional[bool] = None
+
+
+class VideoSessionsData(BaseModel):
+    sessions: List[VideoSession]
+    currentSessionId: Optional[str] = None
+
+
 def get_sessions_file() -> Path:
     """Get the path to the sessions JSON file."""
     data_dir = Path(__file__).parent.parent.parent.parent / "data"
@@ -66,6 +80,14 @@ def load_asset_metadata(metadata_path: Path) -> Optional[AssetMetadata]:
             data = json.load(f)
             data["url"] = f"/outputs/{data['filename']}"
             data["created_at"] = datetime.fromisoformat(data["created_at"])
+
+            # Get file info from the actual image file
+            output_dir = get_output_dir()
+            image_path = output_dir / data["filename"]
+            if image_path.exists():
+                data["file_size"] = image_path.stat().st_size
+                data["file_path"] = str(image_path.resolve())
+
             return AssetMetadata(**data)
     except Exception:
         return None
@@ -148,6 +170,48 @@ async def save_sessions_endpoint(data: SessionsData):
     return data
 
 
+# Video session functions
+def get_video_sessions_file() -> Path:
+    """Get the path to the video sessions JSON file."""
+    data_dir = Path(__file__).parent.parent.parent.parent / "data"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    return data_dir / "video-sessions.json"
+
+
+def load_video_sessions() -> VideoSessionsData:
+    """Load video sessions from file."""
+    sessions_file = get_video_sessions_file()
+    if sessions_file.exists():
+        try:
+            with open(sessions_file, "r") as f:
+                data = json.load(f)
+                return VideoSessionsData(**data)
+        except Exception:
+            pass
+    return VideoSessionsData(sessions=[], currentSessionId=None)
+
+
+def save_video_sessions(data: VideoSessionsData) -> None:
+    """Save video sessions to file."""
+    sessions_file = get_video_sessions_file()
+    with open(sessions_file, "w") as f:
+        json.dump(data.model_dump(), f, indent=2)
+
+
+# Video session endpoints
+@router.get("/video-sessions", response_model=VideoSessionsData)
+async def get_video_sessions():
+    """Get all video sessions."""
+    return load_video_sessions()
+
+
+@router.post("/video-sessions", response_model=VideoSessionsData)
+async def save_video_sessions_endpoint(data: VideoSessionsData):
+    """Save all video sessions."""
+    save_video_sessions(data)
+    return data
+
+
 # Video assets endpoints
 def load_video_asset_metadata(metadata_path: Path) -> Optional[VideoAssetMetadata]:
     """Load video asset metadata from JSON file."""
@@ -159,6 +223,14 @@ def load_video_asset_metadata(metadata_path: Path) -> Optional[VideoAssetMetadat
                 return None
             data["url"] = f"/outputs/{data['filename']}"
             data["created_at"] = datetime.fromisoformat(data["created_at"])
+
+            # Get file info from the actual video file
+            output_dir = get_output_dir()
+            video_path = output_dir / data["filename"]
+            if video_path.exists():
+                data["file_size"] = video_path.stat().st_size
+                data["file_path"] = str(video_path.resolve())
+
             return VideoAssetMetadata(**data)
     except Exception:
         return None

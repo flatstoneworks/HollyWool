@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
+import { Link, useNavigate } from 'react-router-dom'
 import {
   Loader2, Sparkles, ChevronDown, Wand2, Download, Copy,
-  RefreshCw, Trash2, X, ChevronLeft, ChevronRight, Palette,
-  Plus, Minus, MessageSquare, MoreHorizontal, Pencil, GripVertical, Square, Layers
+  RefreshCw, Trash2, Palette, Plus, Minus, MessageSquare,
+  MoreHorizontal, Pencil, GripVertical, Square, Layers
 } from 'lucide-react'
 import { api, type ModelInfo, type Asset, type Job, type LoRAInfo, groupAssetsByBatch } from '@/api/client'
 import { cn } from '@/lib/utils'
@@ -13,6 +14,7 @@ import {
   autoRenameSession,
 } from '@/lib/sessions'
 import type { Session } from '@/api/client'
+import { PREVIEW_MODELS, PROVIDER_PRESETS, type ModelProvider } from '@/types/providers'
 
 type AspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4'
 
@@ -38,6 +40,7 @@ const MAX_SIDEBAR_WIDTH = 400
 const DEFAULT_SIDEBAR_WIDTH = 256
 
 export function ImagePage() {
+  const navigate = useNavigate()
   const [prompt, setPrompt] = useState('')
   const [selectedModel, setSelectedModel] = useState<string>('sd-turbo')
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1')
@@ -51,7 +54,6 @@ export function ImagePage() {
   // LoRA state
   const [selectedLoras, setSelectedLoras] = useState<{ id: string; name: string; weight: number }[]>([])
   const [availableLoras, setAvailableLoras] = useState<LoRAInfo[]>([])
-  const [lightboxImage, setLightboxImage] = useState<Asset | null>(null)
   const [hoveredImage, setHoveredImage] = useState<string | null>(null)
 
   // Session management
@@ -82,6 +84,34 @@ export function ImagePage() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const feedRef = useRef<HTMLDivElement>(null)
+
+  // Dropdown refs for click-outside detection
+  const modelMenuRef = useRef<HTMLDivElement>(null)
+  const styleMenuRef = useRef<HTMLDivElement>(null)
+  const loraMenuRef = useRef<HTMLDivElement>(null)
+  const aspectMenuRef = useRef<HTMLDivElement>(null)
+
+  // Click-outside detection for dropdowns
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node
+      if (showModelMenu && modelMenuRef.current && !modelMenuRef.current.contains(target)) {
+        setShowModelMenu(false)
+      }
+      if (showStyleMenu && styleMenuRef.current && !styleMenuRef.current.contains(target)) {
+        setShowStyleMenu(false)
+      }
+      if (showLoraMenu && loraMenuRef.current && !loraMenuRef.current.contains(target)) {
+        setShowLoraMenu(false)
+      }
+      if (showAspectMenu && aspectMenuRef.current && !aspectMenuRef.current.contains(target)) {
+        setShowAspectMenu(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showModelMenu, showStyleMenu, showLoraMenu, showAspectMenu])
 
   // Persist session drafts to localStorage
   useEffect(() => {
@@ -150,6 +180,16 @@ export function ImagePage() {
     queryKey: ['models'],
     queryFn: api.getModels,
   })
+
+  const { data: providersData } = useQuery({
+    queryKey: ['providers'],
+    queryFn: api.getProviders,
+  })
+
+  // Get configured remote providers with image models
+  const configuredProviders = Object.entries(providersData?.providers || {})
+    .filter(([_, config]) => config.is_configured && config.is_enabled)
+    .map(([providerId]) => providerId as ModelProvider)
 
   const { data: assetsData, refetch: refetchAssets } = useQuery({
     queryKey: ['assets'],
@@ -485,51 +525,18 @@ export function ImagePage() {
     }
   }
 
-  // Lightbox navigation
-  const allImages = batches.flatMap(b => b.images)
-  const lightboxIndex = lightboxImage ? allImages.findIndex(img => img.id === lightboxImage.id) : -1
-
-  const navigateLightbox = (direction: 'prev' | 'next') => {
-    if (lightboxIndex === -1) return
-    const newIndex = direction === 'prev'
-      ? (lightboxIndex - 1 + allImages.length) % allImages.length
-      : (lightboxIndex + 1) % allImages.length
-    setLightboxImage(allImages[newIndex] || null)
-  }
-
-  // Keyboard navigation for lightbox
-  useEffect(() => {
-    if (!lightboxImage) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault()
-        navigateLightbox('prev')
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault()
-        navigateLightbox('next')
-      } else if (e.key === 'Escape') {
-        e.preventDefault()
-        setLightboxImage(null)
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [lightboxImage, lightboxIndex, allImages])
-
   return (
     <div className="flex-1 flex h-full overflow-hidden">
       {/* Session Sidebar - fixed position, scrolls independently */}
       <aside
         ref={sidebarRef}
         style={{ width: sidebarWidth }}
-        className="h-full border-r border-white/5 flex flex-col bg-black/20 relative flex-shrink-0"
+        className="h-full border-r border-border flex flex-col bg-muted/50 dark:bg-black/20 relative flex-shrink-0"
       >
-        <div className="p-3 border-b border-white/5 flex-shrink-0">
+        <div className="p-3 border-b border-border flex-shrink-0">
           <button
             onClick={handleNewSession}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white text-sm font-medium transition-colors"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground text-sm font-medium transition-colors"
           >
             <Plus className="h-4 w-4" />
             New Session
@@ -543,8 +550,8 @@ export function ImagePage() {
               className={cn(
                 'group relative rounded-lg transition-colors cursor-pointer',
                 currentSession?.id === session.id
-                  ? 'bg-white/10'
-                  : 'hover:bg-white/5'
+                  ? 'bg-accent'
+                  : 'hover:bg-muted'
               )}
             >
               {editingSessionId === session.id ? (
@@ -554,7 +561,7 @@ export function ImagePage() {
                   onChange={(e) => setEditingName(e.target.value)}
                   onBlur={() => handleRenameSession(session.id)}
                   onKeyDown={(e) => e.key === 'Enter' && handleRenameSession(session.id)}
-                  className="w-full px-3 py-2 bg-transparent text-sm text-white outline-none"
+                  className="w-full px-3 py-2 bg-transparent text-sm text-primary-foreground outline-none"
                   autoFocus
                 />
               ) : (
@@ -564,7 +571,7 @@ export function ImagePage() {
                 >
                   {/* Thumbnail */}
                   {session.thumbnail ? (
-                    <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0 bg-white/5">
+                    <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0 bg-muted">
                       <img
                         src={session.thumbnail}
                         alt=""
@@ -572,12 +579,12 @@ export function ImagePage() {
                       />
                     </div>
                   ) : (
-                    <div className="w-8 h-8 rounded flex-shrink-0 bg-white/5 flex items-center justify-center">
-                      <MessageSquare className="h-4 w-4 text-white/30" />
+                    <div className="w-8 h-8 rounded flex-shrink-0 bg-muted flex items-center justify-center">
+                      <MessageSquare className="h-4 w-4 text-muted-foreground/50" />
                     </div>
                   )}
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm text-white/80 truncate block">
+                    <span className="text-sm text-foreground/80 truncate block">
                       {session.name}
                     </span>
                     {/* Show job status for this session */}
@@ -599,9 +606,9 @@ export function ImagePage() {
                       e.stopPropagation()
                       setSessionMenuId(sessionMenuId === session.id ? null : session.id)
                     }}
-                    className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-white/10 transition-all"
+                    className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-all"
                   >
-                    <MoreHorizontal className="h-4 w-4 text-white/40" />
+                    <MoreHorizontal className="h-4 w-4 text-muted-foreground/70" />
                   </button>
                 </div>
               )}
@@ -617,14 +624,14 @@ export function ImagePage() {
                         setEditingName(session.name)
                         setSessionMenuId(null)
                       }}
-                      className="w-full px-3 py-1.5 text-left text-sm text-white/80 hover:bg-white/10 flex items-center gap-2"
+                      className="w-full px-3 py-1.5 text-left text-sm text-foreground/80 hover:bg-accent flex items-center gap-2"
                     >
                       <Pencil className="h-3.5 w-3.5" />
                       Rename
                     </button>
                     <button
                       onClick={() => handleDeleteSession(session.id)}
-                      className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-white/10 flex items-center gap-2"
+                      className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-accent flex items-center gap-2"
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                       Delete
@@ -646,7 +653,7 @@ export function ImagePage() {
           )}
         >
           <div className="absolute right-0 top-1/2 -translate-y-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <GripVertical className="h-6 w-6 text-white/30" />
+            <GripVertical className="h-6 w-6 text-muted-foreground/50" />
           </div>
         </div>
       </aside>
@@ -669,7 +676,7 @@ export function ImagePage() {
                         className="relative cursor-pointer group/image"
                         onMouseEnter={() => setHoveredImage(singleImage.id)}
                         onMouseLeave={() => setHoveredImage(null)}
-                        onClick={() => setLightboxImage(singleImage)}
+                        onClick={() => navigate(`/asset/${singleImage.id}`)}
                       >
                         <img
                           src={singleImage.url}
@@ -687,28 +694,28 @@ export function ImagePage() {
                           <div className="flex items-center gap-1">
                             <button
                               onClick={(e) => { e.stopPropagation(); handleDownload(singleImage) }}
-                              className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
+                              className="p-1.5 rounded-md bg-accent hover:bg-white/20 transition-colors"
                               title="Download"
                             >
                               <Download className="h-4 w-4" />
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleCopySeed(singleImage.seed) }}
-                              className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
+                              className="p-1.5 rounded-md bg-accent hover:bg-white/20 transition-colors"
                               title={`Copy seed: ${singleImage.seed}`}
                             >
                               <Copy className="h-4 w-4" />
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); handleRegenerate(singleImage) }}
-                              className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
+                              className="p-1.5 rounded-md bg-accent hover:bg-white/20 transition-colors"
                               title="Regenerate"
                             >
                               <RefreshCw className="h-4 w-4" />
                             </button>
                             <button
                               onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(singleImage.id) }}
-                              className="p-1.5 rounded-md bg-white/10 hover:bg-red-500/50 transition-colors ml-auto"
+                              className="p-1.5 rounded-md bg-accent hover:bg-red-500/50 transition-colors ml-auto"
                               title="Delete"
                             >
                               <Trash2 className="h-4 w-4" />
@@ -721,33 +728,33 @@ export function ImagePage() {
                     {/* Details panel on right */}
                     <div className="flex-1 p-4 flex flex-col justify-between min-w-[200px] md:max-w-[280px]">
                       <div>
-                        <h3 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Prompt</h3>
-                        <p className="text-sm text-white/80 leading-relaxed">{batch.prompt}</p>
+                        <h3 className="text-xs font-medium text-muted-foreground/70 uppercase tracking-wider mb-2">Prompt</h3>
+                        <p className="text-sm text-foreground/80 leading-relaxed">{batch.prompt}</p>
                       </div>
 
                       <div className="mt-4 space-y-3">
                         <div className="grid grid-cols-2 gap-3 text-sm">
                           <div>
-                            <span className="text-xs text-white/40">Model</span>
-                            <p className="text-white/70 truncate">{batch.model}</p>
+                            <span className="text-xs text-muted-foreground/70">Model</span>
+                            <p className="text-muted-foreground truncate">{batch.model}</p>
                           </div>
                           <div>
-                            <span className="text-xs text-white/40">Size</span>
-                            <p className="text-white/70">{batch.width}×{batch.height}</p>
+                            <span className="text-xs text-muted-foreground/70">Size</span>
+                            <p className="text-muted-foreground">{batch.width}×{batch.height}</p>
                           </div>
                           <div>
-                            <span className="text-xs text-white/40">Seed</span>
-                            <p className="text-white/70 font-mono text-xs">{singleImage.seed}</p>
+                            <span className="text-xs text-muted-foreground/70">Seed</span>
+                            <p className="text-muted-foreground font-mono text-xs">{singleImage.seed}</p>
                           </div>
                           <div>
-                            <span className="text-xs text-white/40">Steps</span>
-                            <p className="text-white/70">{singleImage.steps}</p>
+                            <span className="text-xs text-muted-foreground/70">Steps</span>
+                            <p className="text-muted-foreground">{singleImage.steps}</p>
                           </div>
                         </div>
 
                         <button
                           onClick={() => handleCopyPrompt(batch.prompt)}
-                          className="w-full mt-2 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/60 hover:text-white/80 text-sm transition-colors flex items-center justify-center gap-2"
+                          className="w-full mt-2 px-3 py-2 rounded-lg bg-muted hover:bg-accent text-muted-foreground hover:text-foreground/80 text-sm transition-colors flex items-center justify-center gap-2"
                         >
                           <Copy className="h-3.5 w-3.5" />
                           Use this prompt
@@ -767,10 +774,10 @@ export function ImagePage() {
                       {batch.images.map((image) => (
                         <div
                           key={image.id}
-                          className="relative aspect-square rounded-lg overflow-hidden bg-white/5 cursor-pointer group/image"
+                          className="relative aspect-square rounded-lg overflow-hidden bg-muted cursor-pointer group/image"
                           onMouseEnter={() => setHoveredImage(image.id)}
                           onMouseLeave={() => setHoveredImage(null)}
-                          onClick={() => setLightboxImage(image)}
+                          onClick={() => navigate(`/asset/${image.id}`)}
                         >
                           <img
                             src={image.url}
@@ -788,28 +795,28 @@ export function ImagePage() {
                             <div className="flex items-center gap-1">
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleDownload(image) }}
-                                className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
+                                className="p-1.5 rounded-md bg-accent hover:bg-white/20 transition-colors"
                                 title="Download"
                               >
                                 <Download className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleCopySeed(image.seed) }}
-                                className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
+                                className="p-1.5 rounded-md bg-accent hover:bg-white/20 transition-colors"
                                 title={`Copy seed: ${image.seed}`}
                               >
                                 <Copy className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleRegenerate(image) }}
-                                className="p-1.5 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
+                                className="p-1.5 rounded-md bg-accent hover:bg-white/20 transition-colors"
                                 title="Regenerate"
                               >
                                 <RefreshCw className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(image.id) }}
-                                className="p-1.5 rounded-md bg-white/10 hover:bg-red-500/50 transition-colors ml-auto"
+                                className="p-1.5 rounded-md bg-accent hover:bg-red-500/50 transition-colors ml-auto"
                                 title="Delete"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -819,7 +826,7 @@ export function ImagePage() {
 
                           {/* Seed badge */}
                           <div className="absolute top-2 right-2 opacity-0 group-hover/image:opacity-100 transition-opacity">
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-white/60">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 text-muted-foreground">
                               {image.seed}
                             </span>
                           </div>
@@ -828,19 +835,19 @@ export function ImagePage() {
                     </div>
 
                     {/* Card Footer with prompt */}
-                    <div className="px-4 py-3 border-t border-white/5">
+                    <div className="px-4 py-3 border-t border-border">
                       <div className="flex items-start justify-between gap-4">
-                        <p className="text-sm text-white/70 leading-relaxed flex-1">{batch.prompt}</p>
+                        <p className="text-sm text-muted-foreground leading-relaxed flex-1">{batch.prompt}</p>
                         <div className="flex items-center gap-2 flex-shrink-0">
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-white/40">
+                          <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground/70">
                             {batch.model}
                           </span>
-                          <span className="text-xs text-white/30">
+                          <span className="text-xs text-muted-foreground/50">
                             {batch.width}×{batch.height}
                           </span>
                           <button
                             onClick={() => handleCopyPrompt(batch.prompt)}
-                            className="p-1.5 rounded-lg text-white/30 hover:text-white/60 hover:bg-white/5 transition-colors"
+                            className="p-1.5 rounded-lg text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted transition-colors"
                             title="Use this prompt"
                           >
                             <Copy className="h-3.5 w-3.5" />
@@ -867,13 +874,13 @@ export function ImagePage() {
               return (
               <div key={job.id} className="card-container rounded-2xl overflow-hidden border border-primary/30 bg-primary/5">
                 {/* Card Header with status */}
-                <div className="px-4 py-3 border-b border-white/5">
+                <div className="px-4 py-3 border-b border-border">
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-3">
                       <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
                         <Loader2 className="h-3 w-3 animate-spin text-primary" />
                       </div>
-                      <span className="text-sm font-medium text-white/90">
+                      <span className="text-sm font-medium text-foreground">
                         {job.status === 'queued' ? 'Queued' :
                          job.status === 'downloading' ? 'Downloading model' :
                          job.status === 'loading_model' ? 'Loading model' :
@@ -883,11 +890,11 @@ export function ImagePage() {
                     </div>
                     <div className="flex items-center gap-2">
                       {sessionId !== currentSession?.id && (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-white/60">
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-accent text-muted-foreground">
                           {sessionName}
                         </span>
                       )}
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-white/40">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground/70">
                         {job.model}
                       </span>
                     </div>
@@ -901,20 +908,20 @@ export function ImagePage() {
                           'flex-1 h-1.5 rounded-full transition-all duration-300',
                           step.active ? 'bg-primary animate-pulse' :
                           step.completed ? 'bg-primary' :
-                          step.skipped ? 'bg-white/5' :
-                          'bg-white/10'
+                          step.skipped ? 'bg-muted' :
+                          'bg-accent'
                         )} />
                         {idx < steps.length - 1 && <div className="w-1" />}
                       </div>
                     ))}
                   </div>
-                  <div className="flex justify-between text-[10px] text-white/40 px-1">
+                  <div className="flex justify-between text-[10px] text-muted-foreground/70 px-1">
                     {steps.map(step => (
                       <span key={step.id} className={cn(
                         'transition-colors',
                         step.active && 'text-primary font-medium',
-                        step.completed && 'text-white/60',
-                        step.skipped && 'text-white/20'
+                        step.completed && 'text-muted-foreground',
+                        step.skipped && 'text-primary-foreground/20'
                       )}>
                         {step.label}
                       </span>
@@ -923,13 +930,13 @@ export function ImagePage() {
 
                   {/* Progress details */}
                   <div className="mt-3 flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                    <div className="flex-1 h-1.5 bg-accent rounded-full overflow-hidden">
                       <div
                         className="h-full bg-primary transition-all duration-300"
                         style={{ width: `${job.status === 'downloading' ? job.download_progress : job.progress}%` }}
                       />
                     </div>
-                    <span className="text-xs text-white/50 min-w-[3ch]">
+                    <span className="text-xs text-muted-foreground min-w-[3ch]">
                       {job.status === 'downloading'
                         ? `${Math.round(job.download_progress)}%`
                         : `${Math.round(job.progress)}%`}
@@ -937,7 +944,7 @@ export function ImagePage() {
                   </div>
                   {/* Extra download info */}
                   {job.status === 'downloading' && job.download_total_mb && (
-                    <div className="mt-1 text-xs text-white/40">
+                    <div className="mt-1 text-xs text-muted-foreground/70">
                       {job.download_total_mb > 1024
                         ? `${(job.download_total_mb / 1024).toFixed(1)} GB`
                         : `${Math.round(job.download_total_mb)} MB`}
@@ -948,7 +955,7 @@ export function ImagePage() {
                   )}
                   {/* ETA for generation */}
                   {job.status !== 'downloading' && job.eta_seconds !== null && job.eta_seconds > 0 && (
-                    <div className="mt-1 text-xs text-white/40">
+                    <div className="mt-1 text-xs text-muted-foreground/70">
                       ~{Math.round(job.eta_seconds)}s remaining
                     </div>
                   )}
@@ -969,15 +976,15 @@ export function ImagePage() {
                         'aspect-square rounded-lg',
                         i < job.current_image
                           ? 'bg-primary/20 border border-primary/30'
-                          : 'bg-white/5 animate-pulse'
+                          : 'bg-muted animate-pulse'
                       )}
                     />
                   ))}
                 </div>
 
                 {/* Show prompt */}
-                <div className="px-4 py-3 border-t border-white/5">
-                  <p className="text-sm text-white/50">{job.prompt}</p>
+                <div className="px-4 py-3 border-t border-border">
+                  <p className="text-sm text-muted-foreground">{job.prompt}</p>
                 </div>
               </div>
             )})}
@@ -986,11 +993,11 @@ export function ImagePage() {
             {/* Empty state */}
             {batches.length === 0 && activeInProgressJobs.length === 0 && (
               <div className="text-center py-20">
-                <div className="w-20 h-20 rounded-full bg-white/5 flex items-center justify-center mx-auto mb-6">
-                  <Sparkles className="h-10 w-10 text-white/20" />
+                <div className="w-20 h-20 rounded-full bg-muted flex items-center justify-center mx-auto mb-6">
+                  <Sparkles className="h-10 w-10 text-primary-foreground/20" />
                 </div>
-                <h2 className="text-xl font-medium text-white/80 mb-2">Start creating</h2>
-                <p className="text-white/40 max-w-md mx-auto">
+                <h2 className="text-xl font-medium text-foreground/80 mb-2">Start creating</h2>
+                <p className="text-muted-foreground/70 max-w-md mx-auto">
                   Describe what you want to see and generate images
                 </p>
               </div>
@@ -1000,7 +1007,7 @@ export function ImagePage() {
 
         {/* Fixed Bottom Prompt Bar */}
         <div
-          className="fixed bottom-0 right-0 p-4 z-40 bg-gradient-to-t from-[#0d0d0d] via-[#0d0d0d] to-transparent pt-12"
+          className="fixed bottom-0 right-0 p-4 z-40 bg-gradient-to-t from-background via-background to-transparent pt-12"
           style={{ left: sidebarWidth }}
         >
           <div className="max-w-3xl mx-auto">
@@ -1008,7 +1015,7 @@ export function ImagePage() {
               {/* Top row - Options */}
               <div className="flex items-center gap-2 mb-3 px-1 flex-wrap">
                 {/* Model Selector */}
-                <div className="relative">
+                <div className="relative" ref={modelMenuRef}>
                   <button
                     onClick={() => setShowModelMenu(!showModelMenu)}
                     className="model-pill"
@@ -1019,35 +1026,108 @@ export function ImagePage() {
                   </button>
 
                   {showModelMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowModelMenu(false)} />
-                      <div className="absolute bottom-full left-0 mb-2 w-56 py-1 rounded-xl glass-light shadow-xl z-50">
-                        {modelsData?.models.map((model: ModelInfo) => (
-                          <button
-                            key={model.id}
-                            onClick={() => {
-                              setSelectedModel(model.id)
-                              setShowModelMenu(false)
-                            }}
-                            className={cn(
-                              'w-full px-3 py-2 text-left text-sm transition-colors',
-                              'hover:bg-white/10',
-                              selectedModel === model.id && 'text-primary'
-                            )}
-                          >
-                            <div className="font-medium">{model.name}</div>
-                            <div className="text-xs text-white/40 mt-0.5">
-                              {model.default_steps} steps
+                    <div className="absolute bottom-full left-0 mb-2 w-64 rounded-xl glass-light shadow-xl z-[60] flex flex-col">
+                        {/* Scrollable model list */}
+                        <div className="max-h-72 overflow-y-auto scrollbar-thin py-1">
+                          {/* Local Models Section */}
+                          <div className="px-3 py-1.5 text-[10px] font-medium text-amber-400/70 uppercase tracking-wider flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400/70" />
+                            Local Models
+                          </div>
+                          {modelsData?.models
+                            .filter((model: ModelInfo) => !['video', 'ltx2', 'svd', 'video-i2v'].includes(model.type))
+                            .map((model: ModelInfo) => (
+                            <button
+                              key={model.id}
+                              onClick={() => {
+                                setSelectedModel(model.id)
+                                setShowModelMenu(false)
+                              }}
+                              className={cn(
+                                'w-full px-3 py-2 text-left text-sm transition-colors',
+                                'hover:bg-accent',
+                                selectedModel === model.id && 'bg-muted'
+                              )}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className={cn(
+                                  'font-medium truncate',
+                                  selectedModel === model.id && 'text-primary'
+                                )}>
+                                  {model.name}
+                                </span>
+                              </div>
+                              <div className="text-xs text-muted-foreground/70 mt-0.5">
+                                {model.default_steps} steps • {model.type}
+                              </div>
+                            </button>
+                          ))}
+
+                          {/* Remote Models Section */}
+                          <div className="px-3 py-1.5 mt-2 text-[10px] font-medium text-blue-400/70 uppercase tracking-wider flex items-center gap-1.5 border-t border-border pt-3">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-400/70" />
+                            Remote Models
+                          </div>
+                          {configuredProviders.length > 0 ? (
+                            configuredProviders.map(providerId => {
+                              const providerModels = PREVIEW_MODELS[providerId]?.filter(m => m.type === 'image') || []
+                              const providerName = PROVIDER_PRESETS[providerId]?.name || providerId
+                              if (providerModels.length === 0) return null
+                              return (
+                                <div key={providerId}>
+                                  <div className="px-3 py-1 text-[10px] text-blue-400/50 uppercase">
+                                    {providerName}
+                                  </div>
+                                  {providerModels.map(model => (
+                                    <button
+                                      key={model.id}
+                                      onClick={() => {
+                                        setSelectedModel(model.id)
+                                        setShowModelMenu(false)
+                                      }}
+                                      className={cn(
+                                        'w-full px-3 py-2 text-left text-sm transition-colors',
+                                        'hover:bg-accent',
+                                        selectedModel === model.id && 'bg-muted'
+                                      )}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className={cn(
+                                          'font-medium truncate',
+                                          selectedModel === model.id && 'text-primary'
+                                        )}>
+                                          {model.name}
+                                        </span>
+                                      </div>
+                                      <div className="text-xs text-muted-foreground/70 mt-0.5">
+                                        {model.description}
+                                      </div>
+                                    </button>
+                                  ))}
+                                </div>
+                              )
+                            })
+                          ) : (
+                            <div className="px-3 py-2 text-xs text-muted-foreground/50 italic">
+                              Configure API providers in Models page
                             </div>
-                          </button>
-                        ))}
+                          )}
+                        </div>
+                        {/* Add model link */}
+                        <Link
+                          to="/models"
+                          onClick={() => setShowModelMenu(false)}
+                          className="flex items-center gap-2 px-3 py-2.5 text-sm text-primary hover:bg-accent transition-colors border-t border-white/10"
+                        >
+                          <Plus className="h-4 w-4" />
+                          <span>Browse all models</span>
+                        </Link>
                       </div>
-                    </>
                   )}
                 </div>
 
                 {/* Style Selector */}
-                <div className="relative">
+                <div className="relative" ref={styleMenuRef}>
                   <button
                     onClick={() => setShowStyleMenu(!showStyleMenu)}
                     className={cn(
@@ -1061,9 +1141,7 @@ export function ImagePage() {
                   </button>
 
                   {showStyleMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowStyleMenu(false)} />
-                      <div className="absolute bottom-full left-0 mb-2 w-48 py-1 rounded-xl glass-light shadow-xl z-50">
+                    <div className="absolute bottom-full left-0 mb-2 w-48 py-1 rounded-xl glass-light shadow-xl z-[60]">
                         {stylePresets.map((style) => (
                           <button
                             key={style.id}
@@ -1073,7 +1151,7 @@ export function ImagePage() {
                             }}
                             className={cn(
                               'w-full px-3 py-2 text-left text-sm transition-colors',
-                              'hover:bg-white/10',
+                              'hover:bg-accent',
                               selectedStyle === style.id && 'text-primary'
                             )}
                           >
@@ -1081,12 +1159,11 @@ export function ImagePage() {
                           </button>
                         ))}
                       </div>
-                    </>
                   )}
                 </div>
 
                 {/* LoRA Selector */}
-                <div className="relative">
+                <div className="relative" ref={loraMenuRef}>
                   <button
                     onClick={() => setShowLoraMenu(!showLoraMenu)}
                     className={cn(
@@ -1100,15 +1177,13 @@ export function ImagePage() {
                   </button>
 
                   {showLoraMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowLoraMenu(false)} />
-                      <div className="absolute bottom-full left-0 mb-2 w-80 py-2 rounded-xl glass-light shadow-xl z-50 max-h-96 overflow-y-auto">
+                    <div className="absolute bottom-full left-0 mb-2 w-80 py-2 rounded-xl glass-light shadow-xl z-[60] max-h-96 overflow-y-auto">
                         <div className="px-3 pb-2 border-b border-white/10">
-                          <h3 className="text-xs font-medium text-white/40 uppercase">Available LoRAs</h3>
+                          <h3 className="text-xs font-medium text-muted-foreground/70 uppercase">Available LoRAs</h3>
                         </div>
 
                         {availableLoras.length === 0 ? (
-                          <div className="px-3 py-4 text-center text-sm text-white/40">
+                          <div className="px-3 py-4 text-center text-sm text-muted-foreground/70">
                             No compatible LoRAs for this model
                           </div>
                         ) : (
@@ -1117,7 +1192,7 @@ export function ImagePage() {
                             const selectedLora = selectedLoras.find(l => l.id === lora.id)
 
                             return (
-                              <div key={lora.id} className="px-3 py-2 hover:bg-white/5">
+                              <div key={lora.id} className="px-3 py-2 hover:bg-muted">
                                 <div className="flex items-center justify-between">
                                   <label className="flex items-center gap-2 cursor-pointer flex-1">
                                     <input
@@ -1134,12 +1209,12 @@ export function ImagePage() {
                                           setSelectedLoras(selectedLoras.filter(l => l.id !== lora.id))
                                         }
                                       }}
-                                      className="rounded border-white/20 bg-white/5 text-primary focus:ring-primary/50"
+                                      className="rounded border-white/20 bg-muted text-primary focus:ring-primary/50"
                                     />
                                     <div>
                                       <div className="text-sm font-medium">{lora.name}</div>
                                       {lora.description && (
-                                        <div className="text-xs text-white/40">{lora.description}</div>
+                                        <div className="text-xs text-muted-foreground/70">{lora.description}</div>
                                       )}
                                     </div>
                                   </label>
@@ -1154,7 +1229,7 @@ export function ImagePage() {
                                 {isSelected && selectedLora && (
                                   <div className="mt-2 pl-6">
                                     <div className="flex items-center gap-2">
-                                      <span className="text-xs text-white/40 w-12">Weight:</span>
+                                      <span className="text-xs text-muted-foreground/70 w-12">Weight:</span>
                                       <input
                                         type="range"
                                         min="0"
@@ -1166,9 +1241,9 @@ export function ImagePage() {
                                             l.id === lora.id ? { ...l, weight: parseFloat(e.target.value) } : l
                                           ))
                                         }}
-                                        className="flex-1 h-1 bg-white/10 rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
+                                        className="flex-1 h-1 bg-accent rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
                                       />
-                                      <span className="text-xs text-white/60 w-8 text-right">
+                                      <span className="text-xs text-muted-foreground w-8 text-right">
                                         {selectedLora.weight.toFixed(2)}
                                       </span>
                                     </div>
@@ -1183,7 +1258,7 @@ export function ImagePage() {
                         {selectedLoras.length > 0 && (
                           <div className="px-3 pt-2 mt-2 border-t border-white/10">
                             <div className="flex items-center justify-between">
-                              <span className="text-xs text-white/40">
+                              <span className="text-xs text-muted-foreground/70">
                                 {selectedLoras.length} selected
                               </span>
                               <button
@@ -1196,14 +1271,13 @@ export function ImagePage() {
                           </div>
                         )}
                       </div>
-                    </>
                   )}
                 </div>
 
-                <div className="h-5 w-px bg-white/10" />
+                <div className="h-5 w-px bg-accent" />
 
                 {/* Aspect Ratio - Popup selector */}
-                <div className="relative">
+                <div className="relative" ref={aspectMenuRef}>
                   <button
                     onClick={() => setShowAspectMenu(!showAspectMenu)}
                     className="model-pill"
@@ -1214,54 +1288,51 @@ export function ImagePage() {
                   </button>
 
                   {showAspectMenu && (
-                    <>
-                      <div className="fixed inset-0 z-40" onClick={() => setShowAspectMenu(false)} />
-                      <div className="absolute bottom-full left-0 mb-2 p-3 rounded-xl glass-light shadow-xl z-50">
-                        <div className="grid grid-cols-3 gap-2 mb-3">
-                          {aspectRatios.map((ratio) => (
-                            <button
-                              key={ratio.value}
-                              onClick={() => {
-                                setAspectRatio(ratio.value)
-                                setShowAspectMenu(false)
-                              }}
-                              className={cn(
-                                'px-4 py-2 rounded-lg border text-sm font-medium transition-all',
-                                aspectRatio === ratio.value
-                                  ? 'border-white/40 bg-white/10 text-white'
-                                  : 'border-white/10 text-white/60 hover:border-white/20 hover:text-white/80'
-                              )}
-                            >
-                              {ratio.label}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="text-xs text-white/40 text-center">
-                          {selectedAspect.width}×{selectedAspect.height}
-                        </div>
+                    <div className="absolute bottom-full left-0 mb-2 p-3 rounded-xl glass-light shadow-xl z-[60]">
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        {aspectRatios.map((ratio) => (
+                          <button
+                            key={ratio.value}
+                            onClick={() => {
+                              setAspectRatio(ratio.value)
+                              setShowAspectMenu(false)
+                            }}
+                            className={cn(
+                              'px-4 py-2 rounded-lg border text-sm font-medium transition-all',
+                              aspectRatio === ratio.value
+                                ? 'border-white/40 bg-accent text-primary-foreground'
+                                : 'border-white/10 text-muted-foreground hover:border-white/20 hover:text-foreground/80'
+                            )}
+                          >
+                            {ratio.label}
+                          </button>
+                        ))}
                       </div>
-                    </>
+                      <div className="text-xs text-muted-foreground/70 text-center">
+                        {selectedAspect.width}×{selectedAspect.height}
+                      </div>
+                    </div>
                   )}
                 </div>
 
-                <div className="h-5 w-px bg-white/10" />
+                <div className="h-5 w-px bg-accent" />
 
                 {/* Image Count Selector - Higgsfield style */}
-                <div className="flex items-center bg-white/5 rounded-full">
+                <div className="flex items-center bg-muted rounded-full">
                   <button
                     onClick={() => setImageCount(Math.max(1, imageCount - 1))}
                     disabled={imageCount <= 1}
-                    className="p-2 text-white/60 hover:text-white disabled:text-white/20 disabled:cursor-not-allowed transition-colors"
+                    className="p-2 text-muted-foreground hover:text-primary-foreground disabled:text-primary-foreground/20 disabled:cursor-not-allowed transition-colors"
                   >
                     <Minus className="h-4 w-4" />
                   </button>
-                  <span className="px-2 text-sm font-medium text-white/80 min-w-[40px] text-center">
+                  <span className="px-2 text-sm font-medium text-foreground/80 min-w-[40px] text-center">
                     {imageCount}/4
                   </span>
                   <button
                     onClick={() => setImageCount(Math.min(4, imageCount + 1))}
                     disabled={imageCount >= 4}
-                    className="p-2 text-white/60 hover:text-white disabled:text-white/20 disabled:cursor-not-allowed transition-colors"
+                    className="p-2 text-muted-foreground hover:text-primary-foreground disabled:text-primary-foreground/20 disabled:cursor-not-allowed transition-colors"
                   >
                     <Plus className="h-4 w-4" />
                   </button>
@@ -1270,7 +1341,7 @@ export function ImagePage() {
 
               {/* Prompt input row */}
               <div className="flex items-end gap-3">
-                <div className="flex-1 bg-white/5 rounded-xl px-4 py-3">
+                <div className="flex-1 bg-muted rounded-xl px-4 py-3">
                   <textarea
                     ref={textareaRef}
                     placeholder="Describe what you want to create..."
@@ -1306,136 +1377,6 @@ export function ImagePage() {
           </div>
         </div>
       </div>
-
-      {/* Lightbox */}
-      {lightboxImage && (
-        <div
-          className="fixed inset-0 z-50 bg-black/95 flex"
-          onClick={() => setLightboxImage(null)}
-        >
-          {/* Close button */}
-          <button
-            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors z-10"
-            onClick={() => setLightboxImage(null)}
-          >
-            <X className="h-6 w-6" />
-          </button>
-
-          {/* Navigation buttons */}
-          <button
-            className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors z-10"
-            onClick={(e) => { e.stopPropagation(); navigateLightbox('prev') }}
-          >
-            <ChevronLeft className="h-6 w-6" />
-          </button>
-
-          <button
-            className="absolute right-[340px] top-1/2 -translate-y-1/2 p-3 rounded-full bg-white/10 hover:bg-white/20 transition-colors z-10"
-            onClick={(e) => { e.stopPropagation(); navigateLightbox('next') }}
-          >
-            <ChevronRight className="h-6 w-6" />
-          </button>
-
-          {/* Main image area */}
-          <div className="flex-1 flex flex-col items-center justify-center p-8" onClick={(e) => e.stopPropagation()}>
-            <img
-              src={lightboxImage.url}
-              alt={lightboxImage.prompt}
-              className="max-w-full max-h-[80vh] object-contain rounded-xl"
-            />
-
-            {/* Action buttons below image */}
-            <div className="mt-4 flex items-center gap-2">
-              <button
-                onClick={() => handleDownload(lightboxImage)}
-                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                title="Download"
-              >
-                <Download className="h-5 w-5" />
-              </button>
-              <button
-                onClick={() => handleCopySeed(lightboxImage.seed)}
-                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                title="Copy seed"
-              >
-                <Copy className="h-5 w-5" />
-              </button>
-              <button
-                onClick={() => { handleCopyPrompt(lightboxImage.prompt); setLightboxImage(null) }}
-                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                title="Use this prompt"
-              >
-                <MessageSquare className="h-5 w-5" />
-              </button>
-              <button
-                onClick={() => { handleRegenerate(lightboxImage); setLightboxImage(null) }}
-                className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-                title="Regenerate"
-              >
-                <RefreshCw className="h-5 w-5" />
-              </button>
-              <button
-                onClick={() => {
-                  if (confirm('Delete this image?')) {
-                    deleteMutation.mutate(lightboxImage.id)
-                    setLightboxImage(null)
-                  }
-                }}
-                className="p-2 rounded-lg bg-white/10 hover:bg-red-500/50 transition-colors"
-                title="Delete"
-              >
-                <Trash2 className="h-5 w-5" />
-              </button>
-            </div>
-          </div>
-
-          {/* Details sidebar */}
-          <div
-            className="w-[320px] h-full bg-[#111] border-l border-white/10 p-6 overflow-y-auto flex-shrink-0"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Prompt */}
-            <div className="mb-6">
-              <h3 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Prompt</h3>
-              <p className="text-sm text-white/80 leading-relaxed">{lightboxImage.prompt}</p>
-            </div>
-
-            {/* Details grid */}
-            <div className="space-y-4">
-              <h3 className="text-xs font-medium text-white/40 uppercase tracking-wider">Details</h3>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <span className="text-xs text-white/40">Model</span>
-                  <p className="text-sm text-white/80">{lightboxImage.model}</p>
-                </div>
-                <div>
-                  <span className="text-xs text-white/40">Size</span>
-                  <p className="text-sm text-white/80">{lightboxImage.width} × {lightboxImage.height}</p>
-                </div>
-                <div>
-                  <span className="text-xs text-white/40">Steps</span>
-                  <p className="text-sm text-white/80">{lightboxImage.steps}</p>
-                </div>
-                <div>
-                  <span className="text-xs text-white/40">Guidance</span>
-                  <p className="text-sm text-white/80">{lightboxImage.guidance_scale}</p>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-xs text-white/40">Seed</span>
-                <p className="text-sm text-white/80 font-mono">{lightboxImage.seed}</p>
-              </div>
-
-              <div>
-                <span className="text-xs text-white/40">Created</span>
-                <p className="text-sm text-white/80">{new Date(lightboxImage.created_at).toLocaleString()}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

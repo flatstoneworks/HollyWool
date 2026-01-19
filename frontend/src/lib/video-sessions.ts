@@ -1,16 +1,7 @@
-// Video session management - separate from image sessions
-// Uses localStorage since video generation backend is not yet implemented
+// Video session management with backend persistence
+import { api, type VideoSession, type VideoSessionsData } from '@/api/client'
 
-export interface VideoSession {
-  id: string
-  name: string
-  createdAt: string
-  thumbnail?: string
-  isAutoNamed?: boolean
-}
-
-const STORAGE_KEY = 'hollywool_video_sessions'
-const CURRENT_SESSION_KEY = 'hollywool_video_current_session'
+export type { VideoSession, VideoSessionsData }
 
 // Local cache
 let sessionsCache: VideoSession[] = []
@@ -21,41 +12,41 @@ export function generateId(): string {
   return Math.random().toString(36).substring(2, 15)
 }
 
-// Load from localStorage
-function loadFromStorage(): void {
+// Initialize video sessions from backend
+export async function initVideoSessions(): Promise<VideoSessionsData> {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    sessionsCache = stored ? JSON.parse(stored) : []
-    currentSessionIdCache = localStorage.getItem(CURRENT_SESSION_KEY)
+    const data = await api.getVideoSessions()
+    sessionsCache = data.sessions
+    currentSessionIdCache = data.currentSessionId
+    initialized = true
+    return data
   } catch (error) {
-    console.error('Failed to load video sessions:', error)
+    console.error('Failed to load video sessions from backend:', error)
+    // Return empty data on error
     sessionsCache = []
     currentSessionIdCache = null
+    initialized = true
+    return { sessions: [], currentSessionId: null }
   }
-  initialized = true
 }
 
-// Save to localStorage
-function persistSessions(): void {
+// Save video sessions to backend
+async function persistSessions(): Promise<void> {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(sessionsCache))
-    if (currentSessionIdCache) {
-      localStorage.setItem(CURRENT_SESSION_KEY, currentSessionIdCache)
-    } else {
-      localStorage.removeItem(CURRENT_SESSION_KEY)
-    }
+    await api.saveVideoSessions({
+      sessions: sessionsCache,
+      currentSessionId: currentSessionIdCache,
+    })
   } catch (error) {
-    console.error('Failed to save video sessions:', error)
+    console.error('Failed to save video sessions to backend:', error)
   }
 }
 
 export function getVideoSessions(): VideoSession[] {
-  if (!initialized) loadFromStorage()
   return sessionsCache
 }
 
 export function getCurrentVideoSessionId(): string | null {
-  if (!initialized) loadFromStorage()
   return currentSessionIdCache
 }
 
@@ -65,27 +56,22 @@ export function setCurrentVideoSessionId(id: string): void {
 }
 
 export function createVideoSession(name?: string): VideoSession {
-  if (!initialized) loadFromStorage()
-
   const session: VideoSession = {
     id: generateId(),
     name: name || `Video ${sessionsCache.length + 1}`,
     createdAt: new Date().toISOString(),
   }
-  sessionsCache.unshift(session)
+  sessionsCache.unshift(session) // Add to beginning
   currentSessionIdCache = session.id
   persistSessions()
   return session
 }
 
 export function getVideoSession(id: string): VideoSession | undefined {
-  if (!initialized) loadFromStorage()
   return sessionsCache.find(s => s.id === id)
 }
 
 export function updateVideoSession(id: string, updates: Partial<VideoSession>): void {
-  if (!initialized) loadFromStorage()
-
   const index = sessionsCache.findIndex(s => s.id === id)
   if (index !== -1 && sessionsCache[index]) {
     const current = sessionsCache[index]!
@@ -94,37 +80,71 @@ export function updateVideoSession(id: string, updates: Partial<VideoSession>): 
   }
 }
 
-export function deleteVideoSession(id: string): void {
-  if (!initialized) loadFromStorage()
+export function updateVideoSessionThumbnail(sessionId: string, thumbnail: string): void {
+  const session = sessionsCache.find(s => s.id === sessionId)
+  if (session) {
+    session.thumbnail = thumbnail
+    persistSessions()
+  }
+}
 
+export function autoRenameVideoSession(sessionId: string, name: string): void {
+  const session = sessionsCache.find(s => s.id === sessionId)
+  // Only auto-rename if the session hasn't been manually renamed
+  if (session && (session.isAutoNamed !== false)) {
+    session.name = name
+    session.isAutoNamed = true
+    persistSessions()
+  }
+}
+
+export function deleteVideoSession(id: string): void {
   sessionsCache = sessionsCache.filter(s => s.id !== id)
 
+  // If deleted current session, switch to another or create new
   if (currentSessionIdCache === id) {
     if (sessionsCache.length > 0) {
       currentSessionIdCache = sessionsCache[0]!.id
     } else {
       const newSession = createVideoSession()
       currentSessionIdCache = newSession.id
-      return
+      return // createVideoSession already persists
     }
   }
   persistSessions()
 }
 
 export function renameVideoSession(id: string, name: string): void {
-  updateVideoSession(id, { name, isAutoNamed: false })
+  updateVideoSession(id, { name, isAutoNamed: false }) // Mark as manually renamed
 }
 
-export function ensureCurrentVideoSession(): VideoSession {
-  if (!initialized) loadFromStorage()
+// Get or create a current video session
+export async function ensureCurrentVideoSession(): Promise<VideoSession> {
+  if (!initialized) {
+    await initVideoSessions()
+  }
 
+  // Try to use the current session from backend
   if (currentSessionIdCache) {
     const session = getVideoSession(currentSessionIdCache)
     if (session) return session
   }
+
+  // If currentSessionId doesn't match but we have sessions, use the first one
+  // This prevents overwriting existing sessions when a new browser connects
+  if (sessionsCache.length > 0) {
+    const firstSession = sessionsCache[0]!
+    currentSessionIdCache = firstSession.id
+    // Only persist if we're changing the current session ID
+    persistSessions()
+    return firstSession
+  }
+
+  // Only create a new session if there are truly NO sessions
   return createVideoSession()
 }
 
+// Check if video sessions are initialized
 export function isVideoSessionsInitialized(): boolean {
   return initialized
 }
