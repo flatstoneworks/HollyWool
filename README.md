@@ -318,6 +318,31 @@ HollyWool uses HuggingFace's cache system:
 - Supports `delete_revisions()` for cache cleanup
 - Shows actual disk usage vs config estimates
 
+## Model Sources
+
+HollyWool can use models from multiple sources:
+
+### 1. HuggingFace (Current)
+- Official models (FLUX, SDXL, SD3, etc.)
+- Automatic downloading and caching
+- Default source for most models
+
+### 2. Civitai (Planned - See [docs/CIVITAI_INTEGRATION.md](docs/CIVITAI_INTEGRATION.md))
+- **100,000+ community models** - Custom checkpoints, LORAs, embeddings
+- **Top downloads:** Realistic Vision (2M+), DreamShaper (1.5M+), Juggernaut XL (1.3M+)
+- **Specialized content:** Anime, photorealistic, artistic styles, characters
+- **Free downloads:** Download once, use forever locally
+- **Perfect for local inference:** Unlike API providers, Civitai provides downloadable model files
+
+**Why Civitai for HollyWool?**
+- HollyWool = Local inference (runs on your GPU) ✅
+- Civitai = Model repository (download .safetensors files) ✅
+- Perfect match for unlimited customization
+
+**See docs:**
+- [CIVITAI_INTEGRATION.md](docs/CIVITAI_INTEGRATION.md) - Full integration guide
+- [CIVITAI_ANALYSIS.md](docs/CIVITAI_ANALYSIS.md) - Deep dive analysis
+
 ## Roadmap
 
 ### Completed
@@ -333,15 +358,28 @@ HollyWool uses HuggingFace's cache system:
 - [x] Failed job display
 
 ### Planned
+
+#### High Priority
+- [ ] **Civitai Integration** - Browse and download 100,000+ community models
+  - [ ] Model browser with filters and search
+  - [ ] Direct downloads to HollyWool cache
+  - [ ] License display and tracking
+  - [ ] See [docs/CIVITAI_INTEGRATION.md](docs/CIVITAI_INTEGRATION.md) for details
+- [ ] **LoRA Support** - Load and apply LoRAs from Civitai
 - [ ] Additional video models (Wan2.1, LTX-Video, Mochi)
 - [ ] Image-to-video generation
-- [ ] LoRA support
+
+#### Medium Priority
 - [ ] ControlNet integration
 - [ ] Image upscaling
 - [ ] Inpainting/outpainting
+- [ ] TextualInversion/Embedding support
+
+#### Nice to Have
 - [ ] Prompt templates
 - [ ] Generation history search
 - [ ] Export/import sessions
+- [ ] ComfyUI workflow support
 
 ## Git History
 
