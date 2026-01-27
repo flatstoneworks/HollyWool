@@ -38,6 +38,7 @@ class AppSettings(BaseModel):
     default_video_model: Optional[str] = None
     auto_save_history: bool = True
     max_log_entries: int = 1000
+    favorite_models: List[str] = []
 
 
 class SystemInfo(BaseModel):
@@ -48,9 +49,11 @@ class SystemInfo(BaseModel):
     platform: str  # "mac", "linux", "windows"
     device_type: str  # "Spark", "Mac", "PC"
     compute_mode: str  # "GPU", "CPU"
-    cuda_available: bool
+    cuda_available: bool  # GPU hardware detected (via torch or NVML)
+    torch_cuda_enabled: bool = False  # torch compiled with CUDA support
     gpu_name: Optional[str] = None
     gpu_memory_gb: Optional[float] = None
+    gpu_warning: Optional[str] = None  # Warning when GPU present but torch is CPU-only
     python_version: str
     torch_version: Optional[str] = None
 
@@ -218,6 +221,37 @@ async def delete_log(log_id: str):
 
 # ============== System Info Endpoint ==============
 
+def _detect_gpu_via_nvml() -> tuple[bool, str | None, float | None]:
+    """Detect GPU using NVML (pynvml/nvidia-ml-py) as fallback when torch.cuda is unavailable."""
+    try:
+        import pynvml
+        pynvml.nvmlInit()
+        count = pynvml.nvmlDeviceGetCount()
+        if count == 0:
+            pynvml.nvmlShutdown()
+            return False, None, None
+        handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+        name = pynvml.nvmlDeviceGetName(handle)
+        memory_gb = None
+        try:
+            mem = pynvml.nvmlDeviceGetMemoryInfo(handle)
+            memory_gb = round(mem.total / (1024**3), 2)
+        except Exception:
+            # GB10 / unified-memory SoCs don't support memory queries;
+            # fall back to total system RAM (unified memory is shared).
+            try:
+                import os
+                page_size = os.sysconf("SC_PAGE_SIZE")
+                page_count = os.sysconf("SC_PHYS_PAGES")
+                memory_gb = round((page_size * page_count) / (1024**3), 2)
+            except Exception:
+                pass
+        pynvml.nvmlShutdown()
+        return True, name, memory_gb
+    except Exception:
+        return False, None, None
+
+
 @router.get("/system", response_model=SystemInfo)
 async def get_system_info():
     """Get system information."""
@@ -226,19 +260,41 @@ async def get_system_info():
     import platform as plat
 
     cuda_available = False
+    torch_cuda_enabled = False
     gpu_name = None
     gpu_memory_gb = None
     torch_version = None
+    gpu_detected = False  # True if any method found a GPU
+    gpu_warning = None
 
+    # 1) Try torch.cuda first
     try:
         import torch
         torch_version = torch.__version__
         cuda_available = torch.cuda.is_available()
+        torch_cuda_enabled = cuda_available
         if cuda_available:
             gpu_name = torch.cuda.get_device_name(0)
             gpu_memory_gb = round(torch.cuda.get_device_properties(0).total_memory / (1024**3), 2)
+            gpu_detected = True
     except ImportError:
         pass
+
+    # 2) Fallback: detect GPU via NVML (works even with CPU-only torch)
+    if not gpu_detected:
+        nvml_found, nvml_name, nvml_mem = _detect_gpu_via_nvml()
+        if nvml_found:
+            gpu_detected = True
+            gpu_name = nvml_name
+            gpu_memory_gb = nvml_mem
+
+    # 3) Warn if GPU hardware found but torch cannot use it
+    if gpu_detected and not torch_cuda_enabled:
+        gpu_warning = (
+            f"GPU detected ({gpu_name}) but PyTorch is CPU-only "
+            f"(torch {torch_version or 'not installed'}). "
+            f"Run install.sh to enable GPU acceleration."
+        )
 
     # Hostname
     hostname = socket.gethostname()
@@ -264,18 +320,20 @@ async def get_system_info():
         os_name = plat.platform()
 
     # Determine device type
-    if cuda_available and gpu_name and "dgx" in gpu_name.lower():
+    gpu_name_lower = (gpu_name or "").lower()
+    is_spark = "gb10" in gpu_name_lower or "dgx" in gpu_name_lower
+    if gpu_detected and is_spark:
         device_type = "Spark"
     elif platform_name == "mac":
         device_type = "Mac"
-    elif platform_name == "linux" and cuda_available:
+    elif platform_name == "linux" and gpu_detected:
         device_type = "Spark"
     elif platform_name == "windows":
         device_type = "PC"
     else:
         device_type = "PC"
 
-    compute_mode = "GPU" if cuda_available else "CPU"
+    compute_mode = "GPU" if gpu_detected else "CPU"
 
     return SystemInfo(
         app_name="HollyWool",
@@ -285,9 +343,11 @@ async def get_system_info():
         platform=platform_name,
         device_type=device_type,
         compute_mode=compute_mode,
-        cuda_available=cuda_available,
+        cuda_available=cuda_available or gpu_detected,
+        torch_cuda_enabled=torch_cuda_enabled,
         gpu_name=gpu_name,
         gpu_memory_gb=gpu_memory_gb,
+        gpu_warning=gpu_warning,
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
         torch_version=torch_version
     )

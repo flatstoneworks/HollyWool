@@ -198,6 +198,7 @@ export interface AppSettings {
   default_video_model: string | null
   auto_save_history: boolean
   max_log_entries: number
+  favorite_models: string[]
 }
 
 export interface RequestLog {
@@ -230,8 +231,10 @@ export interface SystemInfo {
   device_type: string
   compute_mode: string
   cuda_available: boolean
+  torch_cuda_enabled: boolean
   gpu_name: string | null
   gpu_memory_gb: number | null
+  gpu_warning: string | null
   python_version: string
   torch_version: string | null
 }
@@ -1088,6 +1091,14 @@ export const api = {
     })
     if (!res.ok) throw new Error('Failed to update settings')
     return res.json()
+  },
+
+  async toggleFavorite(modelId: string): Promise<AppSettings> {
+    const settings = await api.getSettings()
+    const favs = settings.favorite_models || []
+    const idx = favs.indexOf(modelId)
+    const updated = idx >= 0 ? favs.filter((id) => id !== modelId) : [...favs, modelId]
+    return api.updateSettings({ ...settings, favorite_models: updated })
   },
 
   async getRequestLogs(params?: { page?: number; page_size?: number; type?: string; status?: string }): Promise<RequestLogsResponse> {

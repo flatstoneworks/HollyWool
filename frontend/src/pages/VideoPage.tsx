@@ -7,6 +7,7 @@ import {
   AlertCircle, Loader2, Download, Volume2, Upload, Image as ImageIcon
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { toast } from '@/hooks/use-toast'
 import {
   getVideoSessions, createVideoSession, setCurrentVideoSessionId, getCurrentVideoSessionId,
   deleteVideoSession, renameVideoSession, ensureCurrentVideoSession, updateVideoSession,
@@ -576,7 +577,9 @@ export function VideoPage() {
         setPrompt('')
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create video job')
+      const errMsg = err instanceof Error ? err.message : 'Failed to create video job'
+      setError(errMsg)
+      toast({ title: 'Generation failed', description: errMsg, variant: 'destructive' })
     } finally {
       setIsSubmitting(false)
     }

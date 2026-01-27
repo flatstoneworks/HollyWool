@@ -47,6 +47,7 @@ export function AssetsPage() {
 
   const deleteImageMutation = useMutation({
     mutationFn: api.deleteAsset,
+    meta: { successMessage: 'Image deleted', errorMessage: 'Delete failed' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['assets'] })
       setSelectedAsset(null)
@@ -55,6 +56,7 @@ export function AssetsPage() {
 
   const deleteVideoMutation = useMutation({
     mutationFn: api.deleteVideoAsset,
+    meta: { successMessage: 'Video deleted', errorMessage: 'Delete failed' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['video-assets'] })
       setSelectedVideoAsset(null)
@@ -63,12 +65,7 @@ export function AssetsPage() {
 
   const upscaleMutation = useMutation({
     mutationFn: (videoAssetId: string) => api.createUpscaleJob({ video_asset_id: videoAssetId }),
-    onSuccess: (data) => {
-      alert(`Upscale job started! ETA: ${Math.round(data.eta_seconds || 0)}s\n\nThe upscaled video will appear in your assets when complete.`)
-    },
-    onError: (error: Error) => {
-      alert(`Failed to start upscale: ${error.message}`)
-    },
+    meta: { successMessage: 'Upscale started', errorMessage: 'Upscale failed' },
   })
 
   // Handle sidebar resize

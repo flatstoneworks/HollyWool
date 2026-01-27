@@ -8,6 +8,43 @@ import {
 import { api } from '@/api/client'
 import { cn } from '@/lib/utils'
 
+function useFavorite(modelId: string | undefined) {
+  const queryClient = useQueryClient()
+
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.getSettings,
+  })
+
+  const isFavorited = settings?.favorite_models?.includes(modelId ?? '') ?? false
+
+  const toggleMutation = useMutation({
+    mutationFn: api.toggleFavorite,
+    meta: { errorMessage: 'Failed to update favorite' },
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: ['settings'] })
+      const prev = queryClient.getQueryData<typeof settings>(['settings'])
+      if (prev) {
+        const favs = prev.favorite_models || []
+        const idx = favs.indexOf(id)
+        const updated = idx >= 0 ? favs.filter((f) => f !== id) : [...favs, id]
+        queryClient.setQueryData(['settings'], { ...prev, favorite_models: updated })
+      }
+      return { prev }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(['settings'], context.prev)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+
+  const toggle = () => { if (modelId) toggleMutation.mutate(modelId) }
+
+  return { isFavorited, toggle }
+}
+
 function formatBytes(mb: number): string {
   if (mb >= 1024) {
     return `${(mb / 1024).toFixed(1)} GB`
@@ -52,6 +89,8 @@ export function ModelDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
+  const { isFavorited, toggle: toggleFavorite } = useFavorite(modelId)
+
   const { data: modelsData, isLoading } = useQuery({
     queryKey: ['models-detailed'],
     queryFn: api.getModelsDetailed,
@@ -59,6 +98,7 @@ export function ModelDetailPage() {
 
   const deleteCacheMutation = useMutation({
     mutationFn: api.deleteModelCache,
+    meta: { successMessage: 'Cache cleared', errorMessage: 'Failed to clear cache' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['models-detailed'] })
     },
@@ -66,6 +106,7 @@ export function ModelDetailPage() {
 
   const downloadMutation = useMutation({
     mutationFn: api.downloadModel,
+    meta: { successMessage: 'Download started', errorMessage: 'Download failed' },
     onSuccess: () => {
       // Start polling for cache status
       const pollInterval = setInterval(async () => {
@@ -138,16 +179,27 @@ export function ModelDetailPage() {
               </div>
             </div>
           </div>
-          {/* HuggingFace Link - top right */}
-          <a
-            href={`https://huggingface.co/${model.path}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 text-sm transition-colors"
-          >
-            <ExternalLink className="h-4 w-4" />
-            View on HuggingFace
-          </a>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleFavorite}
+              className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+              title={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Star className={cn(
+                'h-5 w-5 transition-colors',
+                isFavorited ? 'fill-yellow-500 text-yellow-500' : 'text-white/40 hover:text-yellow-500/60'
+              )} />
+            </button>
+            <a
+              href={`https://huggingface.co/${model.path}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 text-sm transition-colors"
+            >
+              <ExternalLink className="h-4 w-4" />
+              View on HuggingFace
+            </a>
+          </div>
         </div>
 
         {/* Status Banner */}

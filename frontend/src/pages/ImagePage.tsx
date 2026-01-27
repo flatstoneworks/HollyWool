@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { api, type ModelInfo, type Asset, type Job, type LoRAInfo, groupAssetsByBatch } from '@/api/client'
 import { cn } from '@/lib/utils'
+import { toast } from '@/hooks/use-toast'
 import {
   getSessions, createSession, setCurrentSessionId, getCurrentSessionId,
   addBatchToSession, deleteSession, renameSession, ensureCurrentSession,
@@ -407,6 +408,7 @@ export function ImagePage() {
       }, 100)
     } catch (err) {
       console.error('Failed to create job:', err)
+      toast({ title: 'Generation failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
     } finally {
       setIsSubmitting(false)
     }
@@ -427,6 +429,7 @@ export function ImagePage() {
 
   const deleteMutation = useMutation({
     mutationFn: api.deleteAsset,
+    meta: { successMessage: 'Image deleted', errorMessage: 'Delete failed' },
     onSuccess: () => refetchAssets(),
   })
 

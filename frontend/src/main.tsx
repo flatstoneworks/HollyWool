@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, MutationCache } from '@tanstack/react-query'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { ThemeProvider } from './contexts/ThemeContext'
 import { Layout } from './components/Layout'
@@ -16,6 +16,8 @@ import { AssetDetailPage } from './pages/AssetDetailPage'
 import { VideoAssetDetailPage } from './pages/VideoAssetDetailPage'
 import SettingsPage from './pages/SettingsPage'
 import RequestLogsPage from './pages/RequestLogsPage'
+import { Toaster } from './components/ui/toaster'
+import { toast } from './hooks/use-toast'
 import './index.css'
 
 // Redirect to spark.local if running on a DGX Spark and accessed via localhost
@@ -39,6 +41,21 @@ const queryClient = new QueryClient({
       retry: 1,
     },
   },
+  mutationCache: new MutationCache({
+    onSuccess: (_data, _variables, _context, mutation) => {
+      const msg = (mutation.meta as Record<string, string> | undefined)?.successMessage
+      if (msg) {
+        toast({ title: msg, variant: 'success' })
+      }
+    },
+    onError: (error, _variables, _context, mutation) => {
+      const meta = mutation.meta as Record<string, string> | undefined
+      const msg = meta?.errorMessage
+      if (msg) {
+        toast({ title: msg, description: (error as Error).message, variant: 'destructive' })
+      }
+    },
+  }),
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
@@ -68,6 +85,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           </Routes>
         </BrowserRouter>
       </QueryClientProvider>
+      <Toaster />
     </ThemeProvider>
   </React.StrictMode>
 )

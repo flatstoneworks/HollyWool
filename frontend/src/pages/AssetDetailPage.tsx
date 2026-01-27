@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Loader2, Download, Copy, Trash2 } from 'lucide-react'
 import { api } from '@/api/client'
+import { toast } from '@/hooks/use-toast'
 
 export function AssetDetailPage() {
   const { assetId } = useParams<{ assetId: string }>()
@@ -77,8 +78,13 @@ export function AssetDetailPage() {
           <button
             onClick={async () => {
               if (confirm('Delete this image?')) {
-                await api.deleteAsset(asset.id)
-                navigate(-1)
+                try {
+                  await api.deleteAsset(asset.id)
+                  toast({ title: 'Image deleted', variant: 'success' })
+                  navigate(-1)
+                } catch (err) {
+                  toast({ title: 'Delete failed', description: (err as Error).message, variant: 'destructive' })
+                }
               }
             }}
             className="p-2 rounded-lg bg-white/10 hover:bg-red-500/50 transition-colors"

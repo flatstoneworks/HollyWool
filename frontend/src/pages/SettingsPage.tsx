@@ -1,7 +1,7 @@
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Settings, Info, Cpu, Palette,
+  Settings, Info, Cpu, Palette, AlertTriangle,
   Loader2, CheckCircle, Sun, Moon, Monitor, Wand2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -75,6 +75,7 @@ function AppearanceSection() {
 
   const updateSettings = useMutation({
     mutationFn: api.updateSettings,
+    meta: { successMessage: 'Settings saved', errorMessage: 'Failed to save' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] })
     },
@@ -214,6 +215,17 @@ function SystemSection() {
             </div>
           </div>
         </div>
+
+        {/* GPU Warning */}
+        {systemInfo?.gpu_warning && (
+          <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 flex items-start gap-3">
+            <AlertTriangle className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <div className="font-medium text-amber-300 text-sm">GPU Acceleration Unavailable</div>
+              <p className="text-sm text-amber-200/70 mt-1">{systemInfo.gpu_warning}</p>
+            </div>
+          </div>
+        )}
 
         {/* Version Info */}
         <div className="bg-card rounded-lg border border-border p-4">

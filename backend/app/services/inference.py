@@ -43,6 +43,21 @@ class InferenceService:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.dtype = torch.bfloat16 if self.device == "cuda" else torch.float32
 
+        # Warn if GPU hardware is present but torch lacks CUDA support
+        if self.device == "cpu":
+            try:
+                import pynvml
+                pynvml.nvmlInit()
+                count = pynvml.nvmlDeviceGetCount()
+                if count > 0:
+                    name = pynvml.nvmlDeviceGetName(pynvml.nvmlDeviceGetHandleByIndex(0))
+                    print(f"\n⚠️  GPU detected ({name}) but PyTorch is CPU-only (torch {torch.__version__}).")
+                    print(f"   Inference will run on CPU. To enable GPU acceleration, install CUDA-enabled PyTorch:")
+                    print(f"   pip install torch --index-url https://download.pytorch.org/whl/cu128\n")
+                pynvml.nvmlShutdown()
+            except Exception:
+                pass
+
     def _load_config(self, config_path: str) -> dict:
         config_file = Path(__file__).parent.parent.parent / config_path
         with open(config_file, "r") as f:
@@ -665,7 +680,17 @@ class InferenceService:
         return output_path, seed, len(video_frames), fps, None
 
     def is_gpu_available(self) -> bool:
-        return torch.cuda.is_available()
+        if torch.cuda.is_available():
+            return True
+        # Fallback: detect GPU via NVML even when torch is CPU-only
+        try:
+            import pynvml
+            pynvml.nvmlInit()
+            count = pynvml.nvmlDeviceGetCount()
+            pynvml.nvmlShutdown()
+            return count > 0
+        except Exception:
+            return False
 
     def get_all_cached_models_info(self) -> dict[str, dict]:
         """Get detailed info about all cached HuggingFace models using scan_cache_dir()."""

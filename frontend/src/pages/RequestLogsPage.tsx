@@ -56,6 +56,7 @@ export default function RequestLogsPage() {
 
   const clearLogs = useMutation({
     mutationFn: api.clearRequestLogs,
+    meta: { successMessage: 'Logs cleared', errorMessage: 'Failed to clear logs' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['request-logs'] })
       setSelectedLog(null)
@@ -64,6 +65,7 @@ export default function RequestLogsPage() {
 
   const deleteLog = useMutation({
     mutationFn: api.deleteRequestLog,
+    meta: { successMessage: 'Log deleted', errorMessage: 'Delete failed' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['request-logs'] })
       setSelectedLog(null)

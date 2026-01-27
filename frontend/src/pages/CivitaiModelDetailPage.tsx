@@ -14,6 +14,44 @@ import {
 } from '@/api/client'
 import { cn } from '@/lib/utils'
 
+function useCivitaiFavorite(versionId: number | undefined) {
+  const queryClient = useQueryClient()
+  const favId = versionId != null ? `civitai:${versionId}` : undefined
+
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.getSettings,
+  })
+
+  const isFavorited = favId ? (settings?.favorite_models?.includes(favId) ?? false) : false
+
+  const toggleMutation = useMutation({
+    mutationFn: api.toggleFavorite,
+    meta: { errorMessage: 'Failed to update favorite' },
+    onMutate: async (id: string) => {
+      await queryClient.cancelQueries({ queryKey: ['settings'] })
+      const prev = queryClient.getQueryData<typeof settings>(['settings'])
+      if (prev) {
+        const favs = prev.favorite_models || []
+        const idx = favs.indexOf(id)
+        const updated = idx >= 0 ? favs.filter((f) => f !== id) : [...favs, id]
+        queryClient.setQueryData(['settings'], { ...prev, favorite_models: updated })
+      }
+      return { prev }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(['settings'], context.prev)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+
+  const toggle = () => { if (favId) toggleMutation.mutate(favId) }
+
+  return { isFavorited, toggle }
+}
+
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
@@ -60,6 +98,10 @@ export function CivitaiModelDetailPage() {
 
   const numericId = modelId ? parseInt(modelId, 10) : NaN
 
+  // We pass undefined initially; we'll get the real version ID once model loads
+  const [firstVersionId, setFirstVersionId] = useState<number | undefined>(undefined)
+  const { isFavorited, toggle: toggleFavorite } = useCivitaiFavorite(firstVersionId)
+
   const { data: model, isLoading, isError } = useQuery({
     queryKey: ['civitai-model', numericId],
     queryFn: () => api.getCivitaiModel(numericId),
@@ -83,6 +125,7 @@ export function CivitaiModelDetailPage() {
 
   const downloadMutation = useMutation({
     mutationFn: api.startCivitaiDownload,
+    meta: { successMessage: 'Download started', errorMessage: 'Download failed' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['civitai-downloads'] })
       queryClient.invalidateQueries({ queryKey: ['civitai-downloaded-versions'] })
@@ -91,15 +134,19 @@ export function CivitaiModelDetailPage() {
 
   const cancelMutation = useMutation({
     mutationFn: api.cancelCivitaiDownload,
+    meta: { successMessage: 'Download cancelled', errorMessage: 'Cancel failed' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['civitai-downloads'] })
     },
   })
 
-  // Reset image index when model changes
+  // Reset image index and update version ID when model changes
   useEffect(() => {
     setSelectedImageIdx(0)
-  }, [model?.id])
+    if (model?.modelVersions[0]?.id) {
+      setFirstVersionId(model.modelVersions[0].id)
+    }
+  }, [model?.id, model?.modelVersions])
 
   const getDownloadJob = (versionId: number | undefined): CivitaiDownloadJob | undefined =>
     versionId != null
@@ -173,6 +220,16 @@ export function CivitaiModelDetailPage() {
             <ArrowLeft className="h-5 w-5" />
           </button>
           <h1 className="text-lg font-semibold truncate flex-1">{model.name}</h1>
+          <button
+            onClick={toggleFavorite}
+            className="flex-shrink-0 p-1.5 rounded-lg hover:bg-accent transition-colors"
+            title={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+          >
+            <Star className={cn(
+              'h-5 w-5 transition-colors',
+              isFavorited ? 'fill-yellow-500 text-yellow-500' : 'text-muted-foreground hover:text-yellow-500/60'
+            )} />
+          </button>
           {(() => {
             const latestVersion = model.modelVersions[0]
             if (!latestVersion) return null

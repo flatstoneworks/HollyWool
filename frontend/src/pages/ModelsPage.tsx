@@ -22,7 +22,45 @@ import {
   type ModelProvider,
 } from '@/types/providers'
 
-type SelectedView = 'curated' | 'civitai' | ModelProvider
+function useFavorites() {
+  const queryClient = useQueryClient()
+
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.getSettings,
+  })
+
+  const favorites = settings?.favorite_models ?? []
+
+  const toggleMutation = useMutation({
+    mutationFn: api.toggleFavorite,
+    meta: { errorMessage: 'Failed to update favorite' },
+    onMutate: async (modelId: string) => {
+      await queryClient.cancelQueries({ queryKey: ['settings'] })
+      const prev = queryClient.getQueryData<typeof settings>(['settings'])
+      if (prev) {
+        const favs = prev.favorite_models || []
+        const idx = favs.indexOf(modelId)
+        const updated = idx >= 0 ? favs.filter((id) => id !== modelId) : [...favs, modelId]
+        queryClient.setQueryData(['settings'], { ...prev, favorite_models: updated })
+      }
+      return { prev }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.prev) queryClient.setQueryData(['settings'], context.prev)
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+    },
+  })
+
+  const isFavorited = (modelId: string) => favorites.includes(modelId)
+  const toggle = (modelId: string) => toggleMutation.mutate(modelId)
+
+  return { favorites, isFavorited, toggle }
+}
+
+type SelectedView = 'curated' | 'civitai' | 'favorites' | ModelProvider
 type CategoryFilter = 'all' | 'fast' | 'quality' | 'specialized'
 type StatusFilter = 'all' | 'downloaded' | 'not-downloaded'
 
@@ -59,6 +97,8 @@ export function ModelsPage() {
     queryFn: api.getProviders,
   })
 
+  const { favorites, isFavorited, toggle: toggleFavorite } = useFavorites()
+
   const models = modelsData?.models || []
   const totalCacheSize = modelsData?.total_cache_size_gb || 0
   const providersList = providersData?.providers || []
@@ -87,6 +127,33 @@ export function ModelsPage() {
       {/* Left sidebar */}
       <div className="w-56 flex-shrink-0 border-r border-white/5 flex flex-col">
         <div className="p-4 space-y-4">
+          {/* FAVORITES section */}
+          {favorites.length > 0 && (
+            <div>
+              <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">
+                Favorites
+              </span>
+              <button
+                onClick={() => setSelectedView('favorites')}
+                className={cn(
+                  'w-full flex items-center justify-between mt-2 px-3 py-2 rounded-lg text-sm transition-colors',
+                  selectedView === 'favorites'
+                    ? 'bg-primary/20 text-primary'
+                    : 'text-white/70 hover:bg-white/5 hover:text-white'
+                )}
+              >
+                <div className="flex items-center gap-2">
+                  <Star className={cn(
+                    'h-3.5 w-3.5',
+                    selectedView === 'favorites' ? 'fill-primary' : 'fill-yellow-500 text-yellow-500'
+                  )} />
+                  <span>Starred</span>
+                </div>
+                <span className="text-xs text-white/40">{favorites.length}</span>
+              </button>
+            </div>
+          )}
+
           {/* LOCAL section */}
           <div>
             <span className="text-[11px] font-semibold text-white/40 uppercase tracking-wider">
@@ -183,7 +250,16 @@ export function ModelsPage() {
 
       {/* Right content area */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        {selectedView === 'curated' ? (
+        {selectedView === 'favorites' ? (
+          <FavoritesView
+            favorites={favorites}
+            models={models}
+            isLoading={isLoading}
+            currentModel={modelsData?.current_model}
+            isFavorited={isFavorited}
+            onToggleFavorite={toggleFavorite}
+          />
+        ) : selectedView === 'curated' ? (
           <CuratedView
             models={models}
             filteredModels={filteredModels}
@@ -195,13 +271,15 @@ export function ModelsPage() {
             setStatusFilter={setStatusFilter}
             totalCacheSize={totalCacheSize}
             currentModel={modelsData?.current_model}
+            isFavorited={isFavorited}
+            onToggleFavorite={toggleFavorite}
           />
         ) : selectedView === 'civitai' ? (
-          <CivitaiView />
+          <CivitaiView isFavorited={isFavorited} onToggleFavorite={toggleFavorite} />
         ) : (
           <ProviderView
-            providerId={selectedView}
-            isConfigured={isProviderConfigured(selectedView)}
+            providerId={selectedView as ModelProvider}
+            isConfigured={isProviderConfigured(selectedView as string)}
           />
         )}
       </div>
@@ -224,6 +302,8 @@ interface CuratedViewProps {
   setStatusFilter: (f: StatusFilter) => void
   totalCacheSize: number
   currentModel: string | null | undefined
+  isFavorited: (id: string) => boolean
+  onToggleFavorite: (id: string) => void
 }
 
 function CuratedView({
@@ -236,6 +316,8 @@ function CuratedView({
   statusFilter,
   setStatusFilter,
   currentModel,
+  isFavorited,
+  onToggleFavorite,
 }: CuratedViewProps) {
   const getCategoryIcon = (category: string) => {
     switch (category) {
@@ -328,6 +410,8 @@ function CuratedView({
                       key={model.id}
                       model={model}
                       currentModel={currentModel}
+                      isFavorited={isFavorited(model.id)}
+                      onToggleFavorite={() => onToggleFavorite(model.id)}
                     />
                   ))}
                 </div>
@@ -350,6 +434,138 @@ function CuratedView({
           <div className="text-center py-12">
             <p className="text-white/40">No models match your filters</p>
           </div>
+        )}
+      </div>
+    </>
+  )
+}
+
+// =============================================================================
+// Favorites View
+// =============================================================================
+
+interface FavoritesViewProps {
+  favorites: string[]
+  models: ModelDetailedInfo[]
+  isLoading: boolean
+  currentModel: string | null | undefined
+  isFavorited: (id: string) => boolean
+  onToggleFavorite: (id: string) => void
+}
+
+function FavoritesView({ favorites, models, isLoading, currentModel, isFavorited, onToggleFavorite }: FavoritesViewProps) {
+  // Split favorites by source
+  const localFavIds = favorites.filter((id) => !id.includes(':'))
+  const civitaiFavIds = favorites.filter((id) => id.startsWith('civitai:'))
+  const remoteFavIds = favorites.filter((id) => id.includes(':') && !id.startsWith('civitai:'))
+
+  const localFavModels = localFavIds
+    .map((id) => models.find((m) => m.id === id))
+    .filter(Boolean) as ModelDetailedInfo[]
+
+  return (
+    <>
+      <div className="flex-shrink-0 px-6 py-4 border-b border-white/5">
+        <h1 className="text-xl font-semibold text-white">Favorites</h1>
+        <p className="text-sm text-white/50 mt-1">{favorites.length} starred models</p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-white/40" />
+          </div>
+        ) : favorites.length === 0 ? (
+          <div className="text-center py-12">
+            <Star className="h-12 w-12 text-white/20 mx-auto mb-3" />
+            <p className="text-white/40">No favorites yet</p>
+            <p className="text-sm text-white/30 mt-1">Star models to quickly find them here</p>
+          </div>
+        ) : (
+          <>
+            {/* Local favorites */}
+            {localFavModels.length > 0 && (
+              <div>
+                <h2 className="text-lg font-medium text-white/80 mb-4">Local Models</h2>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {localFavModels.map((model) => (
+                    <ModelCard
+                      key={model.id}
+                      model={model}
+                      currentModel={currentModel}
+                      isFavorited={isFavorited(model.id)}
+                      onToggleFavorite={() => onToggleFavorite(model.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Civitai favorites (show as ID list since we don't have full model data) */}
+            {civitaiFavIds.length > 0 && (
+              <div>
+                <h2 className="text-lg font-medium text-white/80 mb-4">Civitai Models</h2>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {civitaiFavIds.map((favId) => {
+                    const versionId = favId.replace('civitai:', '')
+                    return (
+                      <Link
+                        key={favId}
+                        to={`/models?view=civitai`}
+                        className="rounded-xl border border-white/10 bg-white/[0.02] p-4 hover:border-primary/30 transition-all"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-white/80">Civitai Version</p>
+                            <p className="text-xs text-white/40 font-mono mt-0.5">#{versionId}</p>
+                          </div>
+                          <button
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleFavorite(favId) }}
+                            className="p-1 rounded-md hover:bg-white/10 transition-colors"
+                          >
+                            <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
+                          </button>
+                        </div>
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Remote favorites */}
+            {remoteFavIds.length > 0 && (
+              <div>
+                <h2 className="text-lg font-medium text-white/80 mb-4">Remote Models</h2>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {remoteFavIds.map((favId) => {
+                    const [provider, ...rest] = favId.split(':')
+                    const modelId = rest.join(':')
+                    return (
+                      <Link
+                        key={favId}
+                        to={`/models?view=${provider}`}
+                        className="rounded-xl border border-white/10 bg-white/[0.02] p-4 hover:border-primary/30 transition-all"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-white/80 capitalize">{provider}</p>
+                            <p className="text-xs text-white/40 font-mono mt-0.5">{modelId}</p>
+                          </div>
+                          <button
+                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleFavorite(favId) }}
+                            className="p-1 rounded-md hover:bg-white/10 transition-colors"
+                          >
+                            <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
+                          </button>
+                        </div>
+                      </Link>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </>
@@ -509,7 +725,7 @@ const VIDEO_BASE_MODELS = [
   { value: 'LTX Video', label: 'LTX Video' },
 ]
 
-function CivitaiView() {
+function CivitaiView({ isFavorited, onToggleFavorite }: { isFavorited: (id: string) => boolean; onToggleFavorite: (id: string) => void }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const [, setSearchParamsRaw] = useSearchParams()
@@ -594,6 +810,7 @@ function CivitaiView() {
 
   const downloadMutation = useMutation({
     mutationFn: api.startCivitaiDownload,
+    meta: { successMessage: 'Download started', errorMessage: 'Download failed' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['civitai-downloads'] })
       queryClient.invalidateQueries({ queryKey: ['civitai-downloaded-versions'] })
@@ -602,6 +819,7 @@ function CivitaiView() {
 
   const cancelMutation = useMutation({
     mutationFn: api.cancelCivitaiDownload,
+    meta: { successMessage: 'Download cancelled', errorMessage: 'Cancel failed' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['civitai-downloads'] })
     },
@@ -808,20 +1026,22 @@ function CivitaiView() {
         ) : (
           <>
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {allModels.map((model) => (
+              {allModels.map((model) => {
+                const firstVersion = model.modelVersions[0]
+                const favId = firstVersion ? `civitai:${firstVersion.id}` : undefined
+                return (
                 <CivitaiModelCard
                   key={model.id}
                   model={model}
-                  downloadJob={getDownloadJob(model.modelVersions[0]?.id)}
-                  isDownloaded={
-                    model.modelVersions[0]
-                      ? isVersionDownloaded(model.modelVersions[0].id)
-                      : false
-                  }
+                  downloadJob={getDownloadJob(firstVersion?.id)}
+                  isDownloaded={firstVersion ? isVersionDownloaded(firstVersion.id) : false}
                   onDownload={() => handleDownload(model)}
                   onClick={() => navigate(`/models/civitai/${model.id}`)}
+                  isFavorited={favId ? isFavorited(favId) : false}
+                  onToggleFavorite={favId ? () => onToggleFavorite(favId) : undefined}
                 />
-              ))}
+                )
+              })}
             </div>
             {/* Infinite scroll sentinel */}
             <div ref={loadMoreRef} className="flex justify-center py-6">
@@ -843,12 +1063,16 @@ function CivitaiModelCard({
   isDownloaded,
   onDownload,
   onClick,
+  isFavorited,
+  onToggleFavorite,
 }: {
   model: CivitaiModelSummary
   downloadJob?: CivitaiDownloadJob
   isDownloaded: boolean
   onDownload: () => void
   onClick: () => void
+  isFavorited?: boolean
+  onToggleFavorite?: () => void
 }) {
   const version = model.modelVersions[0]
   const thumbnailItem = version?.images[0]
@@ -875,11 +1099,25 @@ function CivitaiModelCard({
         <span className="absolute top-2 left-2 px-2 py-0.5 text-[10px] font-medium rounded bg-black/60 text-white">
           {model.type || 'Model'}
         </span>
-        {version?.baseModel && (
-          <span className="absolute top-2 right-2 px-2 py-0.5 text-[10px] font-medium rounded bg-primary/80 text-white">
-            {version.baseModel}
-          </span>
-        )}
+        <div className="absolute top-2 right-2 flex items-center gap-1">
+          {version?.baseModel && (
+            <span className="px-2 py-0.5 text-[10px] font-medium rounded bg-primary/80 text-white">
+              {version.baseModel}
+            </span>
+          )}
+          {onToggleFavorite && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onToggleFavorite() }}
+              className="p-1 rounded bg-black/50 hover:bg-black/70 transition-colors"
+              title={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+            >
+              <Star className={cn(
+                'h-3.5 w-3.5',
+                isFavorited ? 'fill-yellow-500 text-yellow-500' : 'text-white/60 hover:text-yellow-500/80'
+              )} />
+            </button>
+          )}
+        </div>
       </div>
       {/* Info */}
       <div className="p-3">
@@ -970,9 +1208,11 @@ function formatCivitaiSpeed(bytesPerSec: number): string {
 interface ModelCardProps {
   model: ModelDetailedInfo
   currentModel: string | null | undefined
+  isFavorited?: boolean
+  onToggleFavorite?: () => void
 }
 
-function ModelCard({ model, currentModel }: ModelCardProps) {
+function ModelCard({ model, currentModel, isFavorited, onToggleFavorite }: ModelCardProps) {
   const isCurrentModel = currentModel === model.id
 
   return (
@@ -998,6 +1238,18 @@ function ModelCard({ model, currentModel }: ModelCardProps) {
             <p className="text-xs text-white/40 font-mono mt-0.5">{model.path}</p>
           </div>
           <div className="flex items-center gap-2">
+            {onToggleFavorite && (
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleFavorite() }}
+                className="p-1 rounded-md hover:bg-white/10 transition-colors"
+                title={isFavorited ? 'Remove from favorites' : 'Add to favorites'}
+              >
+                <Star className={cn(
+                  'h-4 w-4 transition-colors',
+                  isFavorited ? 'fill-yellow-500 text-yellow-500' : 'text-white/30 hover:text-yellow-500/60'
+                )} />
+              </button>
+            )}
             {model.requires_approval && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 flex items-center gap-1">
                 <Shield className="h-3 w-3" />

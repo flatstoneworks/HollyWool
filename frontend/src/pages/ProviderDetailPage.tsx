@@ -82,6 +82,7 @@ export function ProviderDetailPage() {
   const updateMutation = useMutation({
     mutationFn: (data: ProviderConfigRequest) =>
       api.updateProvider(providerId!, data),
+    meta: { successMessage: 'Provider updated', errorMessage: 'Update failed' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['provider', providerId] })
       queryClient.invalidateQueries({ queryKey: ['providers'] })
@@ -92,6 +93,7 @@ export function ProviderDetailPage() {
 
   const testMutation = useMutation({
     mutationFn: () => api.testProviderConnection(providerId!),
+    meta: { errorMessage: 'Connection test failed' },
     onSuccess: (result) => {
       setTestResult(result)
     },
@@ -99,6 +101,7 @@ export function ProviderDetailPage() {
 
   const resetMutation = useMutation({
     mutationFn: () => api.deleteProvider(providerId!),
+    meta: { successMessage: 'Provider reset', errorMessage: 'Reset failed' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['provider', providerId] })
       queryClient.invalidateQueries({ queryKey: ['providers'] })
@@ -112,6 +115,7 @@ export function ProviderDetailPage() {
 
   const discoverMutation = useMutation({
     mutationFn: () => api.discoverProviderModels(providerId!),
+    meta: { errorMessage: 'Discovery failed' },
     onSuccess: (result) => {
       setDiscoveredModels(result.models)
       setHasDiscovered(true)
@@ -615,7 +619,7 @@ export function ProviderDetailPage() {
                         </p>
 
                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          {model.tags.map((tag) => (
+                          {model.tags?.map((tag) => (
                             <span
                               key={tag}
                               className="bg-primary/10 text-primary px-1.5 py-0.5 rounded"
