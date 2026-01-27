@@ -1,28 +1,20 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { useUrlState, useClearUrlParams } from '@/hooks/useUrlState'
 import {
   Loader2, Download, Check, ExternalLink, Zap, Sparkles, Star,
-  Shield, AlertCircle, Trash2, HardDrive, Clock, ChevronRight,
+  Shield, AlertCircle, HardDrive, ChevronRight,
   Image, Video, Lock, Search, X, ArrowDownToLine, User,
-  Globe, Settings, ChevronLeft, Heart, FileText,
+  Globe, Settings,
 } from 'lucide-react'
 import {
   api,
   type ModelDetailedInfo,
-  type CacheDeleteResponse,
   type CivitaiModelSummary,
   type CivitaiDownloadRequest,
   type CivitaiDownloadJob,
-  type CivitaiModelVersion,
 } from '@/api/client'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import {
   PROVIDER_PRESETS,
@@ -56,11 +48,22 @@ function formatTimeAgo(timestamp: number | null): string {
 }
 
 export function ModelsPage() {
-  const queryClient = useQueryClient()
-  const [selectedView, setSelectedView] = useState<SelectedView>('curated')
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all')
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
-  const [expandedModel, setExpandedModel] = useState<string | null>(null)
+  const clearUrlParams = useClearUrlParams()
+  const [selectedView, setSelectedViewRaw] = useUrlState('view', 'curated') as [SelectedView, (v: string, opts?: { replace?: boolean }) => void]
+  const [categoryFilter, setCategoryFilter] = useUrlState('category', 'all') as [CategoryFilter, (v: string, opts?: { replace?: boolean }) => void]
+  const [statusFilter, setStatusFilter] = useUrlState('status', 'all') as [StatusFilter, (v: string, opts?: { replace?: boolean }) => void]
+  // When switching views, clear view-specific params
+  const setSelectedView = useCallback((view: SelectedView) => {
+    // Clear curated filters when leaving curated view
+    if (view !== 'curated') {
+      clearUrlParams(['category', 'status'])
+    }
+    // Clear civitai filters when leaving civitai view
+    if (view !== 'civitai') {
+      clearUrlParams(['sort', 'civitaiType', 'base', 'contentCategory'])
+    }
+    setSelectedViewRaw(view)
+  }, [clearUrlParams, setSelectedViewRaw])
 
   // Local models data
   const { data: modelsData, isLoading } = useQuery({
@@ -73,13 +76,6 @@ export function ModelsPage() {
   const { data: providersData } = useQuery({
     queryKey: ['providers'],
     queryFn: api.getProviders,
-  })
-
-  const deleteCacheMutation = useMutation({
-    mutationFn: api.deleteModelCache,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['models-detailed'] })
-    },
   })
 
   const models = modelsData?.models || []
@@ -103,13 +99,6 @@ export function ModelsPage() {
     fast: filteredModels.filter(m => m.category === 'fast'),
     quality: filteredModels.filter(m => m.category === 'quality'),
     specialized: filteredModels.filter(m => m.category === 'specialized'),
-  }
-
-  const handleDeleteCache = (modelId: string, e: React.MouseEvent) => {
-    e.stopPropagation()
-    if (confirm('Are you sure you want to delete this model from cache? It will be re-downloaded when needed.')) {
-      deleteCacheMutation.mutate(modelId)
-    }
   }
 
   return (
@@ -223,10 +212,6 @@ export function ModelsPage() {
             setCategoryFilter={setCategoryFilter}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
-            expandedModel={expandedModel}
-            setExpandedModel={setExpandedModel}
-            handleDeleteCache={handleDeleteCache}
-            deleteCacheMutation={deleteCacheMutation}
             totalCacheSize={totalCacheSize}
             currentModel={modelsData?.current_model}
           />
@@ -256,10 +241,6 @@ interface CuratedViewProps {
   setCategoryFilter: (f: CategoryFilter) => void
   statusFilter: StatusFilter
   setStatusFilter: (f: StatusFilter) => void
-  expandedModel: string | null
-  setExpandedModel: (id: string | null) => void
-  handleDeleteCache: (modelId: string, e: React.MouseEvent) => void
-  deleteCacheMutation: ReturnType<typeof useMutation<CacheDeleteResponse, Error, string>>
   totalCacheSize: number
   currentModel: string | null | undefined
 }
@@ -273,10 +254,6 @@ function CuratedView({
   setCategoryFilter,
   statusFilter,
   setStatusFilter,
-  expandedModel,
-  setExpandedModel,
-  handleDeleteCache,
-  deleteCacheMutation,
   currentModel,
 }: CuratedViewProps) {
   const getCategoryIcon = (category: string) => {
@@ -369,10 +346,6 @@ function CuratedView({
                     <ModelCard
                       key={model.id}
                       model={model}
-                      expanded={expandedModel === model.id}
-                      onToggle={() => setExpandedModel(expandedModel === model.id ? null : model.id)}
-                      onDeleteCache={(e) => handleDeleteCache(model.id, e)}
-                      isDeleting={deleteCacheMutation.isPending && deleteCacheMutation.variables === model.id}
                       currentModel={currentModel}
                     />
                   ))}
@@ -386,10 +359,6 @@ function CuratedView({
               <ModelCard
                 key={model.id}
                 model={model}
-                expanded={expandedModel === model.id}
-                onToggle={() => setExpandedModel(expandedModel === model.id ? null : model.id)}
-                onDeleteCache={(e) => handleDeleteCache(model.id, e)}
-                isDeleting={deleteCacheMutation.isPending && deleteCacheMutation.variables === model.id}
                 currentModel={currentModel}
               />
             ))}
@@ -536,17 +505,41 @@ function ProviderView({ providerId, isConfigured }: ProviderViewProps) {
 
 type CivitaiModelType = '' | 'Checkpoint' | 'LORA'
 type CivitaiSortOption = 'Highest Rated' | 'Most Downloaded' | 'Newest'
+type CivitaiContentCategory = '' | 'image' | 'video'
+
+const IMAGE_BASE_MODELS = [
+  { value: 'SD 1.5', label: 'SD 1.5' },
+  { value: 'SDXL 1.0', label: 'SDXL 1.0' },
+  { value: 'SD 3', label: 'SD 3' },
+  { value: 'SD 3.5', label: 'SD 3.5' },
+  { value: 'Flux.1 D', label: 'Flux.1 Dev' },
+  { value: 'Flux.1 S', label: 'Flux.1 Schnell' },
+  { value: 'Pony', label: 'Pony' },
+]
+
+const VIDEO_BASE_MODELS = [
+  { value: 'Hunyuan Video', label: 'Hunyuan Video' },
+  { value: 'CogVideoX', label: 'CogVideoX' },
+  { value: 'Wan Video', label: 'Wan Video' },
+  { value: 'Wan Video 2.2 T2V-A14B', label: 'Wan 2.2 T2V' },
+  { value: 'Wan Video 2.2 I2V-A14B', label: 'Wan 2.2 I2V' },
+  { value: 'SVD', label: 'SVD' },
+  { value: 'SVD XT', label: 'SVD XT' },
+  { value: 'LTX Video', label: 'LTX Video' },
+]
 
 function CivitaiView() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const [, setSearchParamsRaw] = useSearchParams()
 
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
-  const [typeFilter, setTypeFilter] = useState<CivitaiModelType>('')
-  const [sortBy, setSortBy] = useState<CivitaiSortOption>('Highest Rated')
-  const [baseModelFilter, setBaseModelFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useUrlState('civitaiType', '') as [CivitaiModelType, (v: string, opts?: { replace?: boolean }) => void]
+  const [sortBy, setSortBy] = useUrlState('sort', 'Highest Rated') as [CivitaiSortOption, (v: string, opts?: { replace?: boolean }) => void]
+  const [baseModelFilter, setBaseModelFilter] = useUrlState('base', '')
   const [nsfwEnabled, setNsfwEnabled] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<CivitaiModelSummary | null>(null)
+  const [contentCategory] = useUrlState('contentCategory', '') as [CivitaiContentCategory, (v: string, opts?: { replace?: boolean }) => void]
 
   // Infinite scroll sentinel ref
   const loadMoreRef = useRef<HTMLDivElement>(null)
@@ -559,6 +552,23 @@ function CivitaiView() {
     setDebounceTimer(timer)
   }, [debounceTimer])
 
+  const tagFilter = contentCategory === 'video' ? 'video' : undefined
+
+  // Batch contentCategory + base model reset in a single setSearchParams call
+  // to avoid race conditions between separate useUrlState setters
+  const handleContentCategoryChange = useCallback((cat: CivitaiContentCategory) => {
+    setSearchParamsRaw((prev) => {
+      const next = new URLSearchParams(prev)
+      if (cat === '') {
+        next.delete('contentCategory')
+      } else {
+        next.set('contentCategory', cat)
+      }
+      next.delete('base')
+      return next
+    })
+  }, [setSearchParamsRaw])
+
   const {
     data,
     fetchNextPage,
@@ -567,7 +577,7 @@ function CivitaiView() {
     isLoading,
     isError,
   } = useInfiniteQuery({
-    queryKey: ['civitai-models', debouncedQuery, typeFilter, sortBy, baseModelFilter, nsfwEnabled],
+    queryKey: ['civitai-models', debouncedQuery, typeFilter, sortBy, baseModelFilter, nsfwEnabled, contentCategory],
     queryFn: async ({ pageParam }) => {
       return api.searchCivitaiModels({
         query: debouncedQuery || undefined,
@@ -577,6 +587,7 @@ function CivitaiView() {
         base_models: baseModelFilter || undefined,
         limit: 20,
         cursor: pageParam as string | undefined,
+        tag: tagFilter,
       })
     },
     initialPageParam: undefined as string | undefined,
@@ -659,22 +670,6 @@ function CivitaiView() {
     downloadMutation.mutate(request)
   }
 
-  const handleDownloadVersion = (model: CivitaiModelSummary, version: CivitaiModelVersion) => {
-    const file = version.files[0]
-    if (!file) return
-    const request: CivitaiDownloadRequest = {
-      civitai_model_id: model.id,
-      version_id: version.id,
-      model_name: model.name,
-      type: model.type || 'Checkpoint',
-      filename: file.name || `${model.name}.safetensors`,
-      download_url: version.downloadUrl || '',
-      base_model: version.baseModel,
-      file_size_kb: file.sizeKB,
-    }
-    downloadMutation.mutate(request)
-  }
-
   const activeDownloads = downloads.filter((d) => ['queued', 'downloading'].includes(d.status))
 
   return (
@@ -699,6 +694,27 @@ function CivitaiView() {
                 placeholder="Search..."
                 className="pl-8 pr-3 py-1.5 text-sm rounded-lg border border-white/10 bg-white/5 text-white placeholder:text-white/30 focus:outline-none focus:ring-1 focus:ring-primary w-44"
               />
+            </div>
+            {/* Content category */}
+            <div className="flex items-center bg-white/5 rounded-lg p-1">
+              {([
+                { value: '' as CivitaiContentCategory, label: 'All' },
+                { value: 'image' as CivitaiContentCategory, label: 'Image' },
+                { value: 'video' as CivitaiContentCategory, label: 'Video' },
+              ]).map(({ value, label }) => (
+                <button
+                  key={value}
+                  onClick={() => handleContentCategoryChange(value)}
+                  className={cn(
+                    'px-3 py-1.5 text-sm rounded-md transition-colors',
+                    contentCategory === value
+                      ? 'bg-white/10 text-white'
+                      : 'text-white/50 hover:text-white/70'
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
             {/* Type filter */}
             <div className="flex items-center bg-white/5 rounded-lg p-1">
@@ -734,13 +750,24 @@ function CivitaiView() {
               className="px-2.5 py-1.5 text-sm rounded-lg border border-white/10 bg-white/5 text-white focus:outline-none focus:ring-1 focus:ring-primary"
             >
               <option value="">All Bases</option>
-              <option value="SD 1.5">SD 1.5</option>
-              <option value="SDXL 1.0">SDXL 1.0</option>
-              <option value="SD 3">SD 3</option>
-              <option value="SD 3.5">SD 3.5</option>
-              <option value="Flux.1 D">Flux.1 Dev</option>
-              <option value="Flux.1 S">Flux.1 Schnell</option>
-              <option value="Pony">Pony</option>
+              {(contentCategory !== 'video') && (
+                <>
+                  <optgroup label="Image">
+                    {IMAGE_BASE_MODELS.map(({ value, label }) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </optgroup>
+                </>
+              )}
+              {(contentCategory !== 'image') && (
+                <>
+                  <optgroup label="Video">
+                    {VIDEO_BASE_MODELS.map(({ value, label }) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </optgroup>
+                </>
+              )}
             </select>
             {/* NSFW toggle */}
             <button
@@ -811,7 +838,7 @@ function CivitaiView() {
                       : false
                   }
                   onDownload={() => handleDownload(model)}
-                  onClick={() => setSelectedModel(model)}
+                  onClick={() => navigate(`/models/civitai/${model.id}`)}
                 />
               ))}
             </div>
@@ -825,15 +852,6 @@ function CivitaiView() {
         )}
       </div>
 
-      {/* Model detail modal */}
-      <CivitaiModelDetailModal
-        model={selectedModel}
-        onClose={() => setSelectedModel(null)}
-        getDownloadJob={getDownloadJob}
-        isVersionDownloaded={isVersionDownloaded}
-        onDownloadVersion={handleDownloadVersion}
-        cancelMutation={cancelMutation}
-      />
     </>
   )
 }
@@ -957,266 +975,6 @@ function formatCivitaiSpeed(bytesPerSec: number): string {
   return `${(bytesPerSec / 1024).toFixed(0)} KB/s`
 }
 
-// =============================================================================
-// Civitai Model Detail Modal
-// =============================================================================
-
-function CivitaiModelDetailModal({
-  model,
-  onClose,
-  getDownloadJob,
-  isVersionDownloaded,
-  onDownloadVersion,
-  cancelMutation,
-}: {
-  model: CivitaiModelSummary | null
-  onClose: () => void
-  getDownloadJob: (versionId: number | undefined) => CivitaiDownloadJob | undefined
-  isVersionDownloaded: (versionId: number | undefined) => boolean
-  onDownloadVersion: (model: CivitaiModelSummary, version: CivitaiModelVersion) => void
-  cancelMutation: ReturnType<typeof useMutation<void, Error, string>>
-}) {
-  const [selectedImageIdx, setSelectedImageIdx] = useState(0)
-
-  // Reset image index when model changes
-  useEffect(() => {
-    setSelectedImageIdx(0)
-  }, [model?.id])
-
-  if (!model) return null
-
-  // Collect all images across all versions
-  const allImages = model.modelVersions
-    .flatMap((v) => v.images.map((img) => ({ ...img, versionName: v.name })))
-    .filter((img) => img.url)
-
-  const currentImage = allImages[selectedImageIdx]
-
-  // Strip HTML tags from description for clean display
-  const cleanDescription = model.description
-    ? model.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-    : null
-
-  return (
-    <Dialog open={!!model} onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-0">
-        <div className="overflow-y-auto">
-          {/* Image gallery */}
-          <div className="relative bg-black/40">
-            {currentImage?.url ? (
-              <div className="relative">
-                <img
-                  src={currentImage.url}
-                  alt={model.name}
-                  className="w-full max-h-[400px] object-contain"
-                />
-                {/* Image navigation */}
-                {allImages.length > 1 && (
-                  <>
-                    <button
-                      onClick={() => setSelectedImageIdx((i) => (i - 1 + allImages.length) % allImages.length)}
-                      className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/60 text-white/80 hover:bg-black/80 transition-colors"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => setSelectedImageIdx((i) => (i + 1) % allImages.length)}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/60 text-white/80 hover:bg-black/80 transition-colors"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </button>
-                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
-                      {allImages.slice(0, 12).map((_, i) => (
-                        <button
-                          key={i}
-                          onClick={() => setSelectedImageIdx(i)}
-                          className={cn(
-                            'w-1.5 h-1.5 rounded-full transition-colors',
-                            i === selectedImageIdx ? 'bg-white' : 'bg-white/40'
-                          )}
-                        />
-                      ))}
-                      {allImages.length > 12 && (
-                        <span className="text-[10px] text-white/60 ml-1">+{allImages.length - 12}</span>
-                      )}
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className="h-48 flex items-center justify-center text-white/30">
-                No preview available
-              </div>
-            )}
-          </div>
-
-          {/* Content */}
-          <div className="p-6 space-y-5">
-            {/* Header */}
-            <DialogHeader>
-              <div className="flex items-start justify-between gap-4 pr-8">
-                <div>
-                  <DialogTitle className="text-xl">{model.name}</DialogTitle>
-                  <DialogDescription className="mt-1.5 flex items-center gap-3">
-                    {model.creator?.username && (
-                      <span className="flex items-center gap-1">
-                        <User className="h-3.5 w-3.5" />
-                        {model.creator.username}
-                      </span>
-                    )}
-                    <span className="px-2 py-0.5 text-[11px] rounded bg-white/10 text-white/60">
-                      {model.type || 'Model'}
-                    </span>
-                  </DialogDescription>
-                </div>
-              </div>
-            </DialogHeader>
-
-            {/* Stats row */}
-            <div className="flex items-center gap-4 text-sm text-white/50">
-              {model.stats?.downloadCount != null && (
-                <span className="flex items-center gap-1.5">
-                  <ArrowDownToLine className="h-4 w-4" />
-                  {formatCivitaiCount(model.stats.downloadCount)} downloads
-                </span>
-              )}
-              {model.stats?.rating != null && model.stats.rating > 0 && (
-                <span className="flex items-center gap-1.5">
-                  <Star className="h-4 w-4" />
-                  {model.stats.rating.toFixed(1)}
-                  {model.stats.ratingCount ? ` (${formatCivitaiCount(model.stats.ratingCount)})` : ''}
-                </span>
-              )}
-              {model.stats?.favoriteCount != null && model.stats.favoriteCount > 0 && (
-                <span className="flex items-center gap-1.5">
-                  <Heart className="h-4 w-4" />
-                  {formatCivitaiCount(model.stats.favoriteCount)}
-                </span>
-              )}
-            </div>
-
-            {/* Tags */}
-            {model.tags.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {model.tags.map((tag) => (
-                  <span key={tag} className="px-2 py-0.5 text-xs rounded-full bg-white/5 text-white/50">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {/* Description */}
-            {cleanDescription && (
-              <div>
-                <h3 className="text-sm font-medium text-white/70 mb-2 flex items-center gap-1.5">
-                  <FileText className="h-3.5 w-3.5" /> Description
-                </h3>
-                <p className="text-sm text-white/50 leading-relaxed line-clamp-6">
-                  {cleanDescription}
-                </p>
-              </div>
-            )}
-
-            {/* Versions */}
-            <div>
-              <h3 className="text-sm font-medium text-white/70 mb-3">
-                Versions ({model.modelVersions.length})
-              </h3>
-              <div className="space-y-2">
-                {model.modelVersions.map((version) => {
-                  const file = version.files[0]
-                  const fileSizeMB = file?.sizeKB ? (file.sizeKB / 1024).toFixed(0) : null
-                  const downloaded = isVersionDownloaded(version.id)
-                  const job = getDownloadJob(version.id)
-                  const isDownloading = job?.status === 'downloading'
-                  const isQueued = job?.status === 'queued'
-
-                  return (
-                    <div
-                      key={version.id}
-                      className="flex items-center justify-between gap-3 p-3 rounded-lg border border-white/5 bg-white/[0.02]"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium text-white truncate">{version.name}</span>
-                          {version.baseModel && (
-                            <span className="flex-shrink-0 px-1.5 py-0.5 text-[10px] rounded bg-primary/20 text-primary">
-                              {version.baseModel}
-                            </span>
-                          )}
-                        </div>
-                        {fileSizeMB && (
-                          <span className="text-xs text-white/40 mt-0.5 block">
-                            {file?.name || 'model file'} &middot; {fileSizeMB} MB
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex-shrink-0">
-                        {downloaded ? (
-                          <span className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-green-500/10 text-green-400 border border-green-500/20">
-                            <Check className="h-3.5 w-3.5" /> Downloaded
-                          </span>
-                        ) : isDownloading && job ? (
-                          <div className="flex items-center gap-2 min-w-[120px]">
-                            <div className="flex-1">
-                              <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
-                                <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${job.progress}%` }} />
-                              </div>
-                            </div>
-                            <span className="text-[10px] text-white/50 w-8 text-right">{job.progress.toFixed(0)}%</span>
-                            <button
-                              onClick={() => cancelMutation.mutate(job.id)}
-                              className="text-white/30 hover:text-red-400"
-                            >
-                              <X className="h-3 w-3" />
-                            </button>
-                          </div>
-                        ) : isQueued ? (
-                          <span className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-white/5 text-white/40">
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Queued
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => onDownloadVersion(model, version)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors"
-                          >
-                            <Download className="h-3.5 w-3.5" /> Download
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-
-            {/* Thumbnail strip */}
-            {allImages.length > 1 && (
-              <div>
-                <h3 className="text-sm font-medium text-white/70 mb-2">Gallery</h3>
-                <div className="flex gap-2 overflow-x-auto pb-2">
-                  {allImages.map((img, i) => (
-                    <button
-                      key={i}
-                      onClick={() => setSelectedImageIdx(i)}
-                      className={cn(
-                        'flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors',
-                        i === selectedImageIdx ? 'border-primary' : 'border-transparent hover:border-white/20'
-                      )}
-                    >
-                      <img src={img.url!} alt="" className="w-full h-full object-cover" loading="lazy" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  )
-}
 
 // =============================================================================
 // Model Card (local/curated models)
@@ -1224,24 +982,19 @@ function CivitaiModelDetailModal({
 
 interface ModelCardProps {
   model: ModelDetailedInfo
-  expanded: boolean
-  onToggle: () => void
-  onDeleteCache: (e: React.MouseEvent) => void
-  isDeleting: boolean
   currentModel: string | null | undefined
 }
 
-function ModelCard({ model, expanded, onToggle, onDeleteCache, isDeleting, currentModel }: ModelCardProps) {
+function ModelCard({ model, currentModel }: ModelCardProps) {
   const isCurrentModel = currentModel === model.id
 
   return (
-    <div
+    <Link
+      to={`/model/${model.id}`}
       className={cn(
-        'rounded-xl border bg-white/[0.02] transition-all cursor-pointer',
+        'block rounded-xl border bg-white/[0.02] transition-all hover:border-primary/30',
         model.is_cached ? 'border-green-500/30' : 'border-white/10',
-        expanded && 'ring-1 ring-primary/50'
       )}
-      onClick={onToggle}
     >
       <div className="p-4">
         {/* Header */}
@@ -1292,109 +1045,7 @@ function ModelCard({ model, expanded, onToggle, onDeleteCache, isDeleting, curre
             </span>
           ))}
         </div>
-
-        {/* Expanded details */}
-        {expanded && (
-          <div className="mt-4 pt-4 border-t border-white/5 space-y-3">
-            <div className="grid grid-cols-2 gap-3 text-sm">
-              <div>
-                <span className="text-white/40">Type</span>
-                <p className="text-white/80">{model.type.toUpperCase()}</p>
-              </div>
-              <div>
-                <span className="text-white/40">Default Steps</span>
-                <p className="text-white/80">{model.default_steps}</p>
-              </div>
-              <div>
-                <span className="text-white/40">Guidance Scale</span>
-                <p className="text-white/80">{model.default_guidance}</p>
-              </div>
-              <div>
-                <span className="text-white/40">Size</span>
-                <p className="text-white/80">
-                  {model.is_cached && model.cached_size_mb ? (
-                    <span>
-                      {formatBytes(model.cached_size_mb)}
-                      <span className="text-white/40 ml-1">
-                        (est. {model.estimated_size_gb} GB)
-                      </span>
-                    </span>
-                  ) : (
-                    `~${model.estimated_size_gb} GB`
-                  )}
-                </p>
-              </div>
-            </div>
-
-            {/* Cache info */}
-            {model.is_cached && model.last_accessed && (
-              <div className="flex items-center gap-4 text-xs text-white/40">
-                <span className="flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  Last used: {formatTimeAgo(model.last_accessed)}
-                </span>
-              </div>
-            )}
-
-            {model.requires_approval && model.approval_url && (
-              <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                <AlertCircle className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
-                <div className="text-sm">
-                  <p className="text-amber-200">This model requires accepting terms</p>
-                  <a
-                    href={model.approval_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-amber-400 hover:underline flex items-center gap-1 mt-1"
-                    onClick={e => e.stopPropagation()}
-                  >
-                    Accept on HuggingFace
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-              </div>
-            )}
-
-            {/* Actions */}
-            {model.is_cached && !isCurrentModel && (
-              <button
-                onClick={onDeleteCache}
-                disabled={isDeleting}
-                className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors disabled:opacity-50"
-              >
-                {isDeleting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Trash2 className="h-4 w-4" />
-                )}
-                {isDeleting ? 'Deleting...' : `Delete from cache (frees ${model.actual_size_gb?.toFixed(1) || model.estimated_size_gb} GB)`}
-              </button>
-            )}
-
-            {model.is_cached && isCurrentModel && (
-              <p className="text-xs text-white/40">
-                Cannot delete cache for currently active model
-              </p>
-            )}
-
-            {!model.is_cached && (
-              <p className="text-xs text-white/40">
-                Model will be downloaded automatically when first used
-              </p>
-            )}
-
-            {/* View Details Link */}
-            <Link
-              to={`/model/${model.id}`}
-              onClick={(e) => e.stopPropagation()}
-              className="flex items-center gap-2 px-3 py-2 text-sm rounded-lg bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors mt-2"
-            >
-              View Full Details
-              <ChevronRight className="h-4 w-4" />
-            </Link>
-          </div>
-        )}
       </div>
-    </div>
+    </Link>
   )
 }

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
+import { useUrlState } from '@/hooks/useUrlState'
 import {
   Loader2, Trash2, Copy, X, ChevronLeft, ChevronRight,
   Search, Home, Wand2, ChevronDown, ChevronUp, Download,
@@ -18,11 +19,11 @@ const DEFAULT_SIDEBAR_WIDTH = 256
 
 export function AssetsPage() {
   const queryClient = useQueryClient()
-  const [mediaType, setMediaType] = useState<MediaType>('all')
+  const [mediaType, setMediaType] = useUrlState('type', 'all') as [MediaType, (v: string, opts?: { replace?: boolean }) => void]
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null)
   const [selectedVideoAsset, setSelectedVideoAsset] = useState<VideoAsset | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedFilter, setSelectedFilter] = useState<string>('all')
+  const [selectedFilter, setSelectedFilter] = useUrlState('filter', 'all')
   const [showAllModels, setShowAllModels] = useState(false)
 
   // Resizable sidebar

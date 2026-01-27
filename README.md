@@ -7,6 +7,7 @@ Generate high-quality images and videos using state-of-the-art diffusion models 
 
 ### Image Generation
 - **12 models** across FLUX, SDXL, SD3, and Stable Diffusion architectures
+- **Image-to-Image (I2I)**: upload up to 5 reference images, adjust denoising strength (0.1--1.0), generate guided variations using `AutoPipelineForImage2Image` with zero-cost pipeline conversion
 - **Session management** with auto-naming from prompts and persistent storage
 - **Batch generation** of 1--4 images per prompt with per-image seed control
 - **Async job queue** with real-time progress (download, load, generate, save stages)
@@ -17,6 +18,7 @@ Generate high-quality images and videos using state-of-the-art diffusion models 
 ### Video Generation
 - **Text-to-video**: CogVideoX-5B, CogVideoX-2B, LTX-2 (with synchronized audio), LTX-2 FP8
 - **Image-to-video**: CogVideoX-5B I2V, Stable Video Diffusion XT -- animate any generated image
+- **Multi-reference images**: I2V accepts a `reference_images` array (up to 5), with backward-compatible support for legacy single-image fields
 - **Video upscaling**: Real-ESRGAN 2x/4x with specialized models for anime and video content
 - **Session management** separate from image sessions, persisted server-side
 - **Resource checks**: system memory and GPU utilization are verified before accepting video jobs
@@ -122,7 +124,8 @@ HollyWool/
 ├── outputs/                         # Generated media (gitignored)
 │   ├── {uuid}.png                   # Generated images
 │   ├── {uuid}.mp4                   # Generated videos
-│   └── {uuid}.json                  # Per-asset metadata
+│   ├── {uuid}.json                  # Per-asset metadata
+│   └── {job_id}_source_{N}.png      # I2I/I2V source images (persisted for restart recovery)
 │
 ├── docs/
 │   ├── HOLLYWOOL_VS_HOLLYWAOW.md    # Architecture comparison with HollyWaow
@@ -159,12 +162,12 @@ HollyWool/
 | GET | `/api/system/status` | Real-time CPU, memory, and GPU utilization |
 | GET | `/api/system/can-generate/{model_id}` | Check if resources are sufficient for a model |
 
-### Image Generation
+### Image Generation (T2I + I2I)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/api/generate` | Synchronous image generation |
-| POST | `/api/jobs` | Create async image generation job |
+| POST | `/api/jobs` | Create async image generation job (supports `reference_images` for I2I) |
 | GET | `/api/jobs` | List image jobs (`?session_id=`, `?active_only=true`) |
 | GET | `/api/jobs/{id}` | Get image job status and progress |
 | POST | `/api/generate-title` | Generate a session title from a prompt |
@@ -181,7 +184,7 @@ HollyWool/
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/i2v/jobs` | Create I2V job from base64 image or existing asset |
+| POST | `/api/i2v/jobs` | Create I2V job from `reference_images` array, base64, or asset ID |
 | GET | `/api/i2v/jobs` | List I2V jobs |
 | GET | `/api/i2v/jobs/{id}` | Get I2V job status |
 
@@ -327,6 +330,15 @@ Each stage reports progress:
 
 Failed jobs retain error messages and can be dismissed in the UI.
 
+### Image-to-Image Jobs
+
+When `reference_images` is provided in the generate request:
+- Source images are saved to `outputs/{job_id}_source_{N}.png` for persistence across server restarts
+- The first reference image is used as the I2I source (future-proofed for multi-conditioning)
+- The `strength` parameter (0.0--1.0) controls how much the output deviates from the source: lower values stay closer to the reference, higher values allow more creative freedom
+- I2I jobs use `AutoPipelineForImage2Image.from_pipe()` to convert the loaded T2I pipeline without reloading model weights
+- Per-image metadata JSON includes `source_image_urls` and `strength` fields
+
 ## Session Management
 
 ### Image Sessions
@@ -432,6 +444,8 @@ HollyWool uses HuggingFace's cache system at `~/.cache/huggingface/hub/`. The Mo
 
 ### Completed
 - [x] Image generation with 12 models (FLUX, SDXL, SD, SD3)
+- [x] Image-to-Image generation with reference images and strength control
+- [x] Multi-reference image support (up to 5 images) for I2I and I2V
 - [x] Session management for images and videos
 - [x] Async job queue with progress tracking
 - [x] Model management with cache control and pre-download
@@ -446,11 +460,12 @@ HollyWool uses HuggingFace's cache system at `~/.cache/huggingface/hub/`. The Mo
 - [x] App settings persistence
 - [x] System info header with hover cards
 - [x] Cross-media notifications
+- [x] Civitai integration -- browse and download community models
 
 ### Planned
-- [ ] **Civitai integration** -- browse and download 100,000+ community models ([docs/CIVITAI_INTEGRATION.md](docs/CIVITAI_INTEGRATION.md))
 - [ ] Additional video models (Wan2.1, Mochi)
 - [ ] ControlNet integration
+- [ ] IP-Adapter / multi-conditioning with reference images
 - [ ] Image upscaling (currently video-only)
 - [ ] Inpainting/outpainting
 - [ ] TextualInversion/Embedding support

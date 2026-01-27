@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useUrlState, useUrlStateNumber } from '@/hooks/useUrlState'
 import {
   ScrollText, Loader2, Trash2, CheckCircle, AlertCircle, Clock,
   Image as ImageIcon, Video, Wand2, Copy, ChevronLeft, ChevronRight,
@@ -40,13 +41,16 @@ function formatDate(timestamp: string) {
 export default function RequestLogsPage() {
   const queryClient = useQueryClient()
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null)
-  const [page, setPage] = useState(1)
-  const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined)
-  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
+  const [page, setPage] = useUrlStateNumber('page', 1)
+  const [typeFilter, setTypeFilter] = useUrlState('type', 'all')
+  const [statusFilter, setStatusFilter] = useUrlState('status', 'all')
+
+  const apiTypeFilter = typeFilter === 'all' ? undefined : typeFilter
+  const apiStatusFilter = statusFilter === 'all' ? undefined : statusFilter
 
   const { data: logsData, isLoading } = useQuery({
     queryKey: ['request-logs', page, typeFilter, statusFilter],
-    queryFn: () => api.getRequestLogs({ page, page_size: 50, type: typeFilter, status: statusFilter }),
+    queryFn: () => api.getRequestLogs({ page, page_size: 50, type: apiTypeFilter, status: apiStatusFilter }),
     refetchInterval: 5000,
   })
 
@@ -98,10 +102,10 @@ export default function RequestLogsPage() {
           {['all', 'image', 'video', 'i2v'].map((type) => (
             <button
               key={type}
-              onClick={() => { setTypeFilter(type === 'all' ? undefined : type); setPage(1) }}
+              onClick={() => { setTypeFilter(type); setPage(1) }}
               className={cn(
                 'px-3 py-1.5 text-sm rounded-lg transition-colors',
-                (type === 'all' && !typeFilter) || typeFilter === type
+                typeFilter === type
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted text-muted-foreground hover:bg-accent'
               )}
@@ -115,10 +119,10 @@ export default function RequestLogsPage() {
           {['all', 'completed', 'failed', 'generating', 'pending'].map((status) => (
             <button
               key={status}
-              onClick={() => { setStatusFilter(status === 'all' ? undefined : status); setPage(1) }}
+              onClick={() => { setStatusFilter(status); setPage(1) }}
               className={cn(
                 'px-3 py-1.5 text-sm rounded-lg transition-colors',
-                (status === 'all' && !statusFilter) || statusFilter === status
+                statusFilter === status
                   ? 'bg-primary text-primary-foreground'
                   : 'bg-muted text-muted-foreground hover:bg-accent'
               )}

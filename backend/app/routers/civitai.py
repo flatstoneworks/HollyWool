@@ -25,6 +25,7 @@ async def search_models(
     base_models: Optional[str] = None,
     limit: int = Query(default=20, ge=1, le=100),
     cursor: Optional[str] = None,
+    tag: Optional[str] = None,
 ):
     client = get_civitai_client()
     try:
@@ -36,6 +37,7 @@ async def search_models(
             base_models=base_models,
             limit=limit,
             cursor=cursor,
+            tag=tag,
         )
         response.headers["Cache-Control"] = "private, max-age=300"  # 5 min
         return data

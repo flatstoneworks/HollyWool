@@ -21,7 +21,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Run development server
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8031
 ```
 
 ### Frontend (React + Vite)
@@ -75,7 +75,7 @@ HollyWool/
 │   │   │   ├── Layout.tsx     # App shell with navigation
 │   │   │   └── ui/            # shadcn/ui components
 │   │   ├── pages/
-│   │   │   ├── ImagePage.tsx     # Image generation with model/LoRA selection
+│   │   │   ├── ImagePage.tsx     # Image generation (T2I + I2I) with model/LoRA/ref-image selection
 │   │   │   ├── VideoPage.tsx     # Video generation (T2V and I2V)
 │   │   │   ├── AssetsPage.tsx    # Combined gallery with All/Images/Videos tabs
 │   │   │   ├── ModelsPage.tsx    # Model browser and management
@@ -89,7 +89,10 @@ HollyWool/
 ## Key Files
 
 - **backend/config.yaml** - Define available models with paths, types, and default parameters
-- **backend/app/services/inference.py** - Model loading/switching logic, supports FLUX, SDXL, SD pipelines
+- **backend/app/services/inference.py** - Model loading/switching logic, supports FLUX, SDXL, SD pipelines. Includes `generate()` (T2I) and `generate_from_image()` (I2I via `AutoPipelineForImage2Image.from_pipe()`)
+- **backend/app/services/jobs.py** - Image generation job queue. Detects I2I mode via `reference_images`, routes to `generate_from_image()`, persists source images to disk
+- **backend/app/services/i2v_jobs.py** - Image-to-video job queue. Supports `reference_images` array with backward-compatible legacy fields
+- **backend/app/models/schemas.py** - Pydantic schemas including `ReferenceImage`, `GenerateRequest` (with I2I fields), `I2VGenerateRequest` (with multi-reference)
 - **frontend/src/api/client.ts** - Typed API client matching backend schemas
 
 ## API Endpoints
@@ -98,7 +101,7 @@ HollyWool/
 |--------|----------|-------------|
 | GET | /api/health | GPU status and loaded model |
 | GET | /api/models | List available models |
-| POST | /api/generate | Generate image from prompt |
+| POST | /api/generate | Generate image from prompt (T2I or I2I with `reference_images`) |
 | GET | /api/assets | List generated images |
 | GET | /api/assets/{id} | Get asset metadata |
 | DELETE | /api/assets/{id} | Delete asset |
@@ -140,3 +143,10 @@ models:
 - **ltx2** - LTX-Video for text-to-video
 - **video-i2v** - CogVideoX Image-to-Video
 - **svd** - Stable Video Diffusion
+
+## Access URL
+
+Always provide the full app URL at the end of responses when the dev server is running:
+
+- **Mac (local development):** http://localhost:8030
+- **NVIDIA DGX Spark:** http://spark.local:8030

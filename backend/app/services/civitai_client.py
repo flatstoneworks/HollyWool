@@ -49,8 +49,9 @@ class CivitaiClient:
         base_models: Optional[str],
         limit: int,
         cursor: Optional[str],
+        tag: Optional[str] = None,
     ) -> str:
-        return f"{query}|{types}|{sort}|{nsfw}|{base_models}|{limit}|{cursor}"
+        return f"{query}|{types}|{sort}|{nsfw}|{base_models}|{limit}|{cursor}|{tag}"
 
     async def search_models(
         self,
@@ -61,8 +62,9 @@ class CivitaiClient:
         base_models: Optional[str] = None,
         limit: int = 20,
         cursor: Optional[str] = None,
+        tag: Optional[str] = None,
     ) -> dict:
-        cache_key = self._search_cache_key(query, types, sort, nsfw, base_models, limit, cursor)
+        cache_key = self._search_cache_key(query, types, sort, nsfw, base_models, limit, cursor, tag)
 
         # Check cache
         cached = self._search_cache.get(cache_key)
@@ -84,6 +86,8 @@ class CivitaiClient:
             pass
         if cursor:
             params["cursor"] = cursor
+        if tag:
+            params["tag"] = tag
 
         # Handle baseModels as repeated query params
         url = "/models"

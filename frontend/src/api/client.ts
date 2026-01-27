@@ -575,7 +575,7 @@ export interface ProviderConfig {
 }
 
 export interface AllProvidersResponse {
-  providers: Record<string, ProviderConfig>
+  providers: ProviderConfig[]
 }
 
 export interface ProviderConfigRequest {
@@ -587,6 +587,24 @@ export interface ProviderConfigRequest {
 export interface TestConnectionResponse {
   success: boolean
   message: string
+  error?: string
+}
+
+export interface DiscoveredModel {
+  id: string
+  name: string
+  description: string
+  type: string
+  input_type: string | null
+  model_id: string
+  tags: string[]
+  provider: string
+}
+
+export interface DiscoverResponse {
+  success: boolean
+  discovered: number
+  models: DiscoveredModel[]
   error?: string
 }
 
@@ -1045,6 +1063,14 @@ export const api = {
     return res.json()
   },
 
+  async discoverProviderModels(providerId: string): Promise<DiscoverResponse> {
+    const res = await fetch(`${API_BASE}/providers/${providerId}/discover`, {
+      method: 'POST',
+    })
+    if (!res.ok) throw new Error('Failed to discover provider models')
+    return res.json()
+  },
+
   // ============== Settings Endpoints ==============
 
   async getSettings(): Promise<AppSettings> {
@@ -1107,6 +1133,7 @@ export const api = {
     base_models?: string
     limit?: number
     cursor?: string
+    tag?: string
   }): Promise<CivitaiSearchResponse> {
     const searchParams = new URLSearchParams()
     if (params?.query) searchParams.set('query', params.query)
@@ -1116,6 +1143,7 @@ export const api = {
     if (params?.base_models) searchParams.set('base_models', params.base_models)
     if (params?.limit) searchParams.set('limit', params.limit.toString())
     if (params?.cursor) searchParams.set('cursor', params.cursor)
+    if (params?.tag) searchParams.set('tag', params.tag)
     const url = `${API_BASE}/civitai/models${searchParams.toString() ? `?${searchParams}` : ''}`
     const res = await fetch(url)
     if (!res.ok) throw new Error('Failed to search Civitai models')
