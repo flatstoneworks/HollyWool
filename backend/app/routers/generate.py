@@ -2,6 +2,7 @@ import uuid
 import json
 import random
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -75,6 +76,7 @@ def generate_title_from_prompt(prompt: str) -> str:
 from ..services.inference import get_inference_service
 from ..services.jobs import get_job_manager
 from ..services.lora_manager import get_lora_manager
+from ..services.hf_downloads import get_hf_download_tracker, HFDownloadJob
 from .settings import add_log, RequestLog
 
 router = APIRouter(prefix="/api", tags=["generate"])
@@ -156,7 +158,7 @@ async def delete_model_cache(model_id: str):
 
 
 @router.post("/models/{model_id}/download")
-async def download_model(model_id: str, background_tasks: BackgroundTasks):
+async def download_model(model_id: str):
     """Pre-download a model to cache without loading it into memory."""
     service = get_inference_service()
 
@@ -169,15 +171,36 @@ async def download_model(model_id: str, background_tasks: BackgroundTasks):
     if service.is_model_cached(model_id):
         return {"status": "already_cached", "model_id": model_id}
 
-    # Start background download
+    # Create tracked download job
+    tracker = get_hf_download_tracker()
+    model_name = model_config.get("name", model_id)
+    model_path = model_config.get("path", model_id)
+    job = tracker.create_job(model_id, model_name, model_path)
+
+    # Start background download in a thread
     def do_download():
+        def progress_cb(progress_pct: float, total_mb: float, speed_mbps: float):
+            tracker.update_progress(job.id, progress_pct, total_mb, speed_mbps)
+
         try:
-            service.download_model(model_id)
+            service.download_model(model_id, progress_callback=progress_cb)
+            tracker.complete_job(job.id)
         except Exception as e:
             print(f"Error downloading model {model_id}: {e}")
+            tracker.fail_job(job.id, str(e))
 
-    background_tasks.add_task(do_download)
+    thread = threading.Thread(target=do_download, daemon=True)
+    thread.start()
+
     return {"status": "downloading", "model_id": model_id}
+
+
+@router.get("/models/downloads", response_model=list[HFDownloadJob])
+async def list_hf_downloads():
+    """List active and recent HuggingFace model downloads."""
+    tracker = get_hf_download_tracker()
+    tracker.cleanup_old_jobs()
+    return tracker.get_all_jobs()
 
 
 @router.post("/generate-title", response_model=TitleResponse)
