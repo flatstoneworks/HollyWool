@@ -4,7 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useUrlState, useClearUrlParams } from '@/hooks/useUrlState'
 import {
   Loader2, Download, Check, ExternalLink, Zap, Sparkles, Star,
-  Shield, AlertCircle, HardDrive, ChevronRight,
+  Shield, AlertCircle, HardDrive,
   Image, Video, Lock, Search, X, ArrowDownToLine, User,
   Globe, Settings,
 } from 'lucide-react'
@@ -27,25 +27,6 @@ type CategoryFilter = 'all' | 'fast' | 'quality' | 'specialized'
 type StatusFilter = 'all' | 'downloaded' | 'not-downloaded'
 
 const PROVIDER_IDS: ModelProvider[] = ['krea', 'higgsfield', 'fal']
-
-function formatBytes(mb: number): string {
-  if (mb >= 1024) {
-    return `${(mb / 1024).toFixed(1)} GB`
-  }
-  return `${mb.toFixed(0)} MB`
-}
-
-function formatTimeAgo(timestamp: number | null): string {
-  if (!timestamp) return 'Never'
-  const now = Date.now() / 1000
-  const diff = now - timestamp
-
-  if (diff < 60) return 'Just now'
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`
-  return `${Math.floor(diff / 604800)}w ago`
-}
 
 export function ModelsPage() {
   const clearUrlParams = useClearUrlParams()
@@ -870,7 +851,9 @@ function CivitaiModelCard({
   onClick: () => void
 }) {
   const version = model.modelVersions[0]
-  const thumbnail = version?.images[0]?.url
+  const thumbnailItem = version?.images[0]
+  const thumbnail = thumbnailItem?.url
+  const thumbnailIsVideo = thumbnailItem?.type === 'video'
   const file = version?.files[0]
   const fileSizeMB = file?.sizeKB ? (file.sizeKB / 1024).toFixed(0) : null
   const isDownloading = downloadJob?.status === 'downloading'
@@ -881,7 +864,11 @@ function CivitaiModelCard({
       {/* Thumbnail */}
       <div className="aspect-[4/3] bg-white/5 relative overflow-hidden">
         {thumbnail ? (
-          <img src={thumbnail} alt={model.name} className="w-full h-full object-cover" loading="lazy" />
+          thumbnailIsVideo ? (
+            <video src={thumbnail} className="w-full h-full object-cover" muted autoPlay loop playsInline />
+          ) : (
+            <img src={thumbnail} alt={model.name} className="w-full h-full object-cover" loading="lazy" />
+          )
         ) : (
           <div className="w-full h-full flex items-center justify-center text-white/30">No preview</div>
         )}

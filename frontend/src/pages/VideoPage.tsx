@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Sparkles, ChevronDown, Palette, X, Wand2,
@@ -106,6 +106,8 @@ const MAX_SIDEBAR_WIDTH = 400
 const DEFAULT_SIDEBAR_WIDTH = 256
 
 export function VideoPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+
   // Fetch configured providers
   const { data: providersData } = useQuery({
     queryKey: ['providers'],
@@ -188,15 +190,40 @@ export function VideoPage() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Initialize video sessions (separate from image sessions)
+  // Initialize video sessions - resolve from URL or set default
   useEffect(() => {
     const initSessions = async () => {
-      const session = await ensureCurrentVideoSession()
+      const urlSessionId = searchParams.get('session')
+      const allSessions = getVideoSessions()
+
+      let session: VideoSession | null = null
+
+      // Try to find session from URL param
+      if (urlSessionId) {
+        session = allSessions.find(s => s.id === urlSessionId) || null
+      }
+
+      // If no valid session from URL, use ensureCurrentVideoSession
+      if (!session) {
+        session = await ensureCurrentVideoSession()
+        // Set URL with replace so back button doesn't go to no-session URL
+        if (session) {
+          setSearchParams((prev) => {
+            const next = new URLSearchParams(prev)
+            next.set('session', session!.id)
+            return next
+          }, { replace: true })
+        }
+      } else {
+        // Valid session from URL - make it current in localStorage too
+        setCurrentVideoSessionId(session.id)
+      }
+
       setCurrentSession(session)
       setSessions(getVideoSessions())
     }
     initSessions()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Helper to get dimensions from aspect ratio and resolution
   const getDimensions = (aspect: AspectRatio, res: Resolution): { width: number; height: number } => {
@@ -567,11 +594,23 @@ export function VideoPage() {
     setSessions(getVideoSessions())
     setCurrentSession(session)
     setPrompt('')
+    // Push new session to URL (creates history entry)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('session', session.id)
+      return next
+    })
   }
 
   const handleSwitchSession = (session: VideoSession) => {
     setCurrentVideoSessionId(session.id)
     setCurrentSession(session)
+    // Push session to URL (creates history entry)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('session', session.id)
+      return next
+    })
   }
 
   const handleDeleteSession = (id: string) => {

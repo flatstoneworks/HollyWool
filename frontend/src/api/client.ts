@@ -615,6 +615,7 @@ export interface CivitaiModelImage {
   nsfw?: string
   width?: number
   height?: number
+  type?: string // "image" or "video"
 }
 
 export interface CivitaiModelFile {

@@ -20,6 +20,7 @@ class CivitaiModelImage(BaseModel):
     nsfw: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    type: Optional[str] = None  # "image" or "video"
 
 
 class CivitaiModelFile(BaseModel):

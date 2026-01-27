@@ -94,10 +94,10 @@ export function ModelDetailPage() {
         <AlertCircle className="h-12 w-12 text-red-400" />
         <p className="text-white/60">Model not found: {modelId}</p>
         <button
-          onClick={() => navigate('/models')}
+          onClick={() => navigate(-1)}
           className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
         >
-          Back to Models
+          Go Back
         </button>
       </div>
     )
@@ -331,14 +331,14 @@ export function ModelDetailPage() {
           )}
         </div>
 
-        {/* Back to Models */}
+        {/* Back */}
         <div className="flex items-center justify-between pt-4">
-          <Link
-            to="/models"
+          <button
+            onClick={() => navigate(-1)}
             className="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors"
           >
-            Back to Models
-          </Link>
+            Back
+          </button>
         </div>
       </div>
     </div>

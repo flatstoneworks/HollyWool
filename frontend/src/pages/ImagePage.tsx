@@ -1,11 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Loader2, Sparkles, ChevronDown, Wand2, Download, Copy,
   RefreshCw, Trash2, Palette, Plus, Minus, MessageSquare,
   MoreHorizontal, Pencil, GripVertical, Square, Layers,
-  Image as ImageIcon, X, Upload
+  Image as ImageIcon, X
 } from 'lucide-react'
 import { api, type ModelInfo, type Asset, type Job, type LoRAInfo, groupAssetsByBatch } from '@/api/client'
 import { cn } from '@/lib/utils'
@@ -42,6 +42,7 @@ const DEFAULT_SIDEBAR_WIDTH = 256
 
 export function ImagePage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [prompt, setPrompt] = useState('')
   const [selectedModel, setSelectedModel] = useState<string>('sd-turbo')
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1')
@@ -135,10 +136,35 @@ export function ImagePage() {
     }
   }, [prompt, currentSession?.id])
 
-  // Initialize sessions from backend
+  // Initialize sessions - resolve from URL or set default
   useEffect(() => {
     const loadSessions = async () => {
-      const session = await ensureCurrentSession()
+      const urlSessionId = searchParams.get('session')
+      const allSessions = getSessions()
+
+      let session: Session | null = null
+
+      // Try to find session from URL param
+      if (urlSessionId) {
+        session = allSessions.find(s => s.id === urlSessionId) || null
+      }
+
+      // If no valid session from URL, use ensureCurrentSession
+      if (!session) {
+        session = await ensureCurrentSession()
+        // Set URL with replace so back button doesn't go to no-session URL
+        if (session) {
+          setSearchParams((prev) => {
+            const next = new URLSearchParams(prev)
+            next.set('session', session!.id)
+            return next
+          }, { replace: true })
+        }
+      } else {
+        // Valid session from URL - make it current in localStorage too
+        setCurrentSessionId(session.id)
+      }
+
       setCurrentSession(session)
       setSessions(getSessions())
       // Load draft for initial session
@@ -148,7 +174,7 @@ export function ImagePage() {
       }
     }
     loadSessions()
-  }, [])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handle sidebar resize
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -488,6 +514,12 @@ export function ImagePage() {
     setSessions(getSessions())
     setCurrentSession(session)
     setPrompt('')  // New session starts with empty prompt
+    // Push new session to URL (creates history entry)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('session', session.id)
+      return next
+    })
   }
 
   const handleSwitchSession = (session: Session) => {
@@ -500,6 +532,12 @@ export function ImagePage() {
     setCurrentSession(session)
     // Restore draft for new session
     setPrompt(sessionDrafts[session.id] || '')
+    // Push session to URL (creates history entry)
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('session', session.id)
+      return next
+    })
   }
 
   const handleDeleteSession = (id: string) => {

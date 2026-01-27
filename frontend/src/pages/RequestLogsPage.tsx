@@ -189,7 +189,7 @@ export default function RequestLogsPage() {
           {totalPages > 1 && (
             <div className="border-t border-border px-4 py-2 flex items-center justify-between text-sm flex-shrink-0">
               <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
+                onClick={() => setPage(Math.max(1, page - 1))}
                 disabled={page === 1}
                 className="p-1.5 hover:bg-accent rounded disabled:opacity-30 transition-colors"
               >
@@ -199,7 +199,7 @@ export default function RequestLogsPage() {
                 Page {page} of {totalPages}
               </span>
               <button
-                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                onClick={() => setPage(Math.min(totalPages, page + 1))}
                 disabled={page >= totalPages}
                 className="p-1.5 hover:bg-accent rounded disabled:opacity-30 transition-colors"
               >

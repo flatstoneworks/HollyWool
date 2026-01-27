@@ -8,6 +8,7 @@ import { ImagePage } from './pages/ImagePage'
 import { VideoPage } from './pages/VideoPage'
 import { AssetsPage } from './pages/AssetsPage'
 import { ModelsPage } from './pages/ModelsPage'
+import { CivitaiModelDetailPage } from './pages/CivitaiModelDetailPage'
 import { ProviderDetailPage } from './pages/ProviderDetailPage'
 import { JobDetailPage } from './pages/JobDetailPage'
 import { ModelDetailPage } from './pages/ModelDetailPage'
@@ -45,6 +46,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route path="video" element={<VideoPage />} />
               <Route path="assets" element={<AssetsPage />} />
               <Route path="models" element={<ModelsPage />} />
+              <Route path="models/civitai/:modelId" element={<CivitaiModelDetailPage />} />
               <Route path="provider/:providerId" element={<ProviderDetailPage />} />
               <Route path="model/:modelId" element={<ModelDetailPage />} />
               <Route path="job/:jobId" element={<JobDetailPage />} />

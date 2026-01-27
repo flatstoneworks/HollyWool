@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useUrlState } from '@/hooks/useUrlState'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -39,6 +39,7 @@ type DiscoveryFilter = 'all' | 'image' | 'video'
 
 export function ProviderDetailPage() {
   const { providerId } = useParams<{ providerId: string }>()
+  const navigate = useNavigate()
   const queryClient = useQueryClient()
 
   const provider = providerId ? PROVIDERS[providerId] : undefined
@@ -133,11 +134,9 @@ export function ProviderDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
         <p className="text-lg mb-2">Provider not found</p>
-        <Button variant="ghost" asChild>
-          <Link to="/models">
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Models
-          </Link>
+        <Button variant="ghost" onClick={() => navigate(-1)}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Go Back
         </Button>
       </div>
     )
@@ -162,13 +161,13 @@ export function ProviderDetailPage() {
       {/* Header */}
       <div className="p-6 border-b border-border">
         <div className="max-w-3xl mx-auto">
-          <Link
-            to="/models"
+          <button
+            onClick={() => navigate(-1)}
             className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4"
           >
             <ArrowLeft className="h-4 w-4" />
-            Back to Models
-          </Link>
+            Back
+          </button>
 
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
