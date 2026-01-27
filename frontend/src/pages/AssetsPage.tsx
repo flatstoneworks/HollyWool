@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import {
   Loader2, Trash2, Copy, X, ChevronLeft, ChevronRight,
   Search, Home, Wand2, ChevronDown, ChevronUp, Download,
-  GripVertical, ImageIcon, Film, ArrowUpCircle
+  GripVertical, ImageIcon, Film, ArrowUpCircle, MessageSquare
 } from 'lucide-react'
 import { api, type Asset, type VideoAsset } from '@/api/client'
 import { Card } from '@/components/ui/card'
@@ -42,7 +42,6 @@ export function AssetsPage() {
     queryFn: () => api.getVideoAssets({ limit: 100 }),
   })
 
-  const data = mediaType === 'images' ? imageData : undefined
   const isLoading = isLoadingImages || isLoadingVideos
 
   const deleteImageMutation = useMutation({
@@ -80,7 +79,8 @@ export function AssetsPage() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return
-      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX))
+      const navWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nav-sidebar-width')) || 56
+      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX - navWidth))
       setSidebarWidth(newWidth)
     }
 

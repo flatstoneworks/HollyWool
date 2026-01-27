@@ -2,10 +2,10 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Loader2, Download, Check, ExternalLink, Zap, Sparkles, Star,
-  Shield, AlertCircle, Trash2, HardDrive, Clock, Film, ImageIcon, Settings,
+  Shield, AlertCircle, Trash2, Clock, Film, ImageIcon,
   Play
 } from 'lucide-react'
-import { api, type ModelDetailedInfo } from '@/api/client'
+import { api } from '@/api/client'
 import { cn } from '@/lib/utils'
 
 function formatBytes(mb: number): string {

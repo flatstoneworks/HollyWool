@@ -541,8 +541,8 @@ async def create_i2v_job(request: I2VGenerateRequest):
         raise HTTPException(status_code=400, detail=f"Model {request.model} does not support I2V")
 
     # Validate image source is provided
-    if not request.image_base64 and not request.image_asset_id:
-        raise HTTPException(status_code=400, detail="Must provide image_base64 or image_asset_id")
+    if not request.reference_images and not request.image_base64 and not request.image_asset_id:
+        raise HTTPException(status_code=400, detail="Must provide reference_images, image_base64, or image_asset_id")
 
     # Check system resources before accepting job
     model_size_gb = model_config.get("size_gb", 12)

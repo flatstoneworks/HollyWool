@@ -106,47 +106,72 @@ class I2VJobManager:
 
         return total_time
 
-    def _save_source_image(self, image: Image.Image, job_id: str) -> str:
-        """Save the source image and return its URL."""
+    def _save_source_image(self, image: Image.Image, job_id: str, index: int = 0) -> str:
+        """Save a source image and return its URL."""
         output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        image_path = output_dir / f"{job_id}_source.png"
+        image_path = output_dir / f"{job_id}_source_{index}.png"
         image.save(image_path, "PNG")
-        return f"/outputs/{job_id}_source.png"
+        return f"/outputs/{job_id}_source_{index}.png"
 
-    def _load_source_image(self, request: I2VGenerateRequest, job_id: str) -> tuple[Image.Image, str]:
-        """Load source image from request and return (image, source_url)."""
+    def _load_source_images(self, request: I2VGenerateRequest, job_id: str) -> tuple[list, list[str]]:
+        """Load source images from request and return (list[PIL.Image], list[str urls]).
+
+        Supports the new reference_images array and falls back to legacy
+        image_base64/image_asset_id fields for backward compatibility.
+        """
         output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
+        images = []
+        urls = []
 
+        # New: reference_images array
+        if request.reference_images:
+            for i, ref in enumerate(request.reference_images[:5]):
+                if ref.image_base64:
+                    image_data = ref.image_base64
+                    if "," in image_data:
+                        image_data = image_data.split(",", 1)[1]
+                    decoded = base64.b64decode(image_data)
+                    img = Image.open(io.BytesIO(decoded))
+                elif ref.image_asset_id:
+                    asset_path = output_dir / f"{ref.image_asset_id}.png"
+                    if not asset_path.exists():
+                        asset_path = output_dir / f"{ref.image_asset_id}.jpg"
+                    if not asset_path.exists():
+                        raise ValueError(f"Asset not found: {ref.image_asset_id}")
+                    img = Image.open(asset_path)
+                else:
+                    continue
+
+                url = self._save_source_image(img, job_id, i)
+                images.append(img)
+                urls.append(url)
+
+            if images:
+                return images, urls
+
+        # Legacy: single image_base64 or image_asset_id
         if request.image_base64:
-            # Decode base64 image
-            # Handle data URL format: data:image/png;base64,<data>
             image_data = request.image_base64
             if "," in image_data:
                 image_data = image_data.split(",", 1)[1]
-
             decoded = base64.b64decode(image_data)
             image = Image.open(io.BytesIO(decoded))
-
-            # Save source image for reference
-            source_url = self._save_source_image(image, job_id)
-            return image, source_url
+            source_url = self._save_source_image(image, job_id, 0)
+            return [image], [source_url]
 
         elif request.image_asset_id:
-            # Load from existing asset
             asset_path = output_dir / f"{request.image_asset_id}.png"
             if not asset_path.exists():
-                # Try jpg
                 asset_path = output_dir / f"{request.image_asset_id}.jpg"
             if not asset_path.exists():
                 raise ValueError(f"Asset not found: {request.image_asset_id}")
-
             image = Image.open(asset_path)
-            return image, f"/outputs/{asset_path.name}"
+            return [image], [f"/outputs/{asset_path.name}"]
 
         else:
-            raise ValueError("Must provide image_base64 or image_asset_id")
+            raise ValueError("Must provide reference_images, image_base64, or image_asset_id")
 
     def create_job(self, request: I2VGenerateRequest) -> I2VJob:
         """Create a new I2V job and add it to the queue."""
@@ -166,8 +191,8 @@ class I2VJobManager:
 
         job_id = str(uuid.uuid4())
 
-        # Load and save source image
-        image, source_url = self._load_source_image(request, job_id)
+        # Load and save source images
+        images, source_urls = self._load_source_images(request, job_id)
 
         job = I2VJob(
             id=job_id,
@@ -178,7 +203,7 @@ class I2VJobManager:
             total_frames=num_frames,
             prompt=request.prompt,
             model=request.model,
-            source_image_url=source_url,
+            source_image_urls=source_urls,
             width=request.width,
             height=request.height,
             steps=steps,
@@ -188,9 +213,9 @@ class I2VJobManager:
             eta_seconds=self._estimate_time(request.model, steps, num_frames, include_model_load=True),
         )
 
-        # Store the PIL image temporarily for processing
+        # Store PIL images temporarily for processing
         self._pending_images = getattr(self, '_pending_images', {})
-        self._pending_images[job_id] = image
+        self._pending_images[job_id] = images
 
         with self.lock:
             self.jobs[job.id] = job
@@ -255,16 +280,21 @@ class I2VJobManager:
             return
 
         try:
-            # Get the pending image
-            image = self._pending_images.pop(job_id, None)
-            if image is None:
-                # Try to reload from saved source
+            # Get the pending images
+            images = self._pending_images.pop(job_id, None)
+            if images is None:
+                # Try to reload from saved source files
                 output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
-                source_path = output_dir / f"{job_id}_source.png"
-                if source_path.exists():
-                    image = Image.open(source_path)
-                else:
+                images = []
+                for url in job.source_image_urls:
+                    source_path = output_dir / url.split("/")[-1]
+                    if source_path.exists():
+                        images.append(Image.open(source_path))
+                if not images:
                     raise ValueError("Source image not found")
+
+            # Use first image for generation (current models support single source)
+            image = images[0]
 
             # Check if model needs downloading
             needs_download = not service.is_model_cached(job.model)
@@ -339,7 +369,7 @@ class I2VJobManager:
                 "filename": f"{asset_id}.mp4",
                 "type": "video",
                 "generation_type": "i2v",
-                "source_image": job.source_image_url,
+                "source_images": job.source_image_urls,
                 "prompt": job.prompt,
                 "model": job.model,
                 "width": job.width,

@@ -59,12 +59,45 @@ class LoRAManager:
             ))
 
         # Scan local directory for .safetensors files
-        if self.local_dir.exists():
-            for lora_file in self.local_dir.glob("**/*.safetensors"):
+        scan_dirs = [self.local_dir]
+        # Also scan Civitai LoRA directory
+        civitai_lora_dir = Path(os.path.expanduser("~/.cache/hollywool/civitai/loras"))
+        if civitai_lora_dir.exists() and civitai_lora_dir != self.local_dir:
+            scan_dirs.append(civitai_lora_dir)
+
+        for scan_dir in scan_dirs:
+            if not scan_dir.exists():
+                continue
+            source_label = "civitai" if scan_dir == civitai_lora_dir else "local"
+            for lora_file in scan_dir.glob("**/*.safetensors"):
                 lora_id = f"local_{lora_file.stem}"
 
                 # Try to infer compatible types from filename
                 compatible_types = self._infer_compatible_types(lora_file.stem)
+
+                # Check metadata JSON for base_model info
+                meta_path = lora_file.with_suffix(".json")
+                if meta_path.exists():
+                    try:
+                        import json
+                        with open(meta_path) as mf:
+                            meta = json.load(mf)
+                        base_model = meta.get("base_model", "")
+                        if base_model:
+                            inferred = []
+                            bm = base_model.lower()
+                            if "sdxl" in bm:
+                                inferred.append("sdxl")
+                            if "sd 1" in bm or "sd1" in bm:
+                                inferred.append("sd")
+                            if "sd 3" in bm or "sd3" in bm:
+                                inferred.append("sd3")
+                            if "flux" in bm:
+                                inferred.append("flux")
+                            if inferred:
+                                compatible_types = inferred
+                    except Exception:
+                        pass
 
                 # Filter by model type if specified
                 if model_type and model_type not in compatible_types:
@@ -74,10 +107,10 @@ class LoRAManager:
                     id=lora_id,
                     name=lora_file.stem.replace("_", " ").replace("-", " ").title(),
                     path=str(lora_file),
-                    source="local",
+                    source=source_label,
                     compatible_types=compatible_types,
                     default_weight=0.8,
-                    description=f"Local LoRA: {lora_file.name}",
+                    description=f"{source_label.title()} LoRA: {lora_file.name}",
                     is_downloaded=True,
                 ))
 

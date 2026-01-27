@@ -196,8 +196,8 @@ export function JobDetailPage() {
       const currentIdx = getStatusIndex(currentStatus)
       if (currentIdx > 0) {
         const prevStep = statusSteps[currentIdx - 1]
-        if (prevStep && timings[prevStep.key] && !timings[prevStep.key].endedAt) {
-          timings[prevStep.key].endedAt = currentTime
+        if (prevStep && timings[prevStep.key] && !timings[prevStep.key]!.endedAt) {
+          timings[prevStep.key]!.endedAt = currentTime
         }
       }
 
@@ -226,8 +226,8 @@ export function JobDetailPage() {
       const currentIdx = getStatusIndex(currentStatus)
       if (currentIdx > 0) {
         const prevStep = statusSteps[currentIdx - 1]
-        if (prevStep && timings[prevStep.key] && !timings[prevStep.key].endedAt) {
-          timings[prevStep.key].endedAt = completedTime
+        if (prevStep && timings[prevStep.key] && !timings[prevStep.key]!.endedAt) {
+          timings[prevStep.key]!.endedAt = completedTime
         }
       }
       if (timings[currentStatus] && !timings[currentStatus].endedAt) {
@@ -353,7 +353,6 @@ export function JobDetailPage() {
               {statusSteps.slice(0, -1).map((step, idx) => {
                 const isPast = idx < currentStepIndex
                 const isCurrent = idx === currentStepIndex && isActive
-                const isUpcoming = idx > currentStepIndex
                 const timing = stepTimings[step.key]
 
                 // Calculate duration for this step

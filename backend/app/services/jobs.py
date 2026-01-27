@@ -3,10 +3,13 @@ import uuid
 import threading
 import time
 import random
+import base64
+import io
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
 from queue import Queue
+from PIL import Image
 
 from ..models.schemas import Job, JobStatus, ImageResult, GenerateRequest
 from .inference import get_inference_service
@@ -106,6 +109,43 @@ class JobManager:
 
         return total_time
 
+    def _save_source_image(self, image: Image.Image, job_id: str, index: int) -> str:
+        """Save a source image and return its URL."""
+        output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        image_path = output_dir / f"{job_id}_source_{index}.png"
+        image.save(image_path, "PNG")
+        return f"/outputs/{job_id}_source_{index}.png"
+
+    def _load_reference_images(self, request: GenerateRequest, job_id: str) -> tuple[list, list[str]]:
+        """Load reference images from request and return (list[PIL.Image], list[str urls])."""
+        output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
+        images = []
+        urls = []
+
+        for i, ref in enumerate(request.reference_images[:5]):  # Max 5
+            if ref.image_base64:
+                image_data = ref.image_base64
+                if "," in image_data:
+                    image_data = image_data.split(",", 1)[1]
+                decoded = base64.b64decode(image_data)
+                img = Image.open(io.BytesIO(decoded))
+            elif ref.image_asset_id:
+                asset_path = output_dir / f"{ref.image_asset_id}.png"
+                if not asset_path.exists():
+                    asset_path = output_dir / f"{ref.image_asset_id}.jpg"
+                if not asset_path.exists():
+                    raise ValueError(f"Asset not found: {ref.image_asset_id}")
+                img = Image.open(asset_path)
+            else:
+                continue
+
+            url = self._save_source_image(img, job_id, i)
+            images.append(img)
+            urls.append(url)
+
+        return images, urls
+
     def create_job(self, request: GenerateRequest) -> Job:
         """Create a new job and add it to the queue."""
         service = get_inference_service()
@@ -113,8 +153,20 @@ class JobManager:
 
         steps = request.steps if request.steps else model_config["default_steps"]
 
+        job_id = str(uuid.uuid4())
+
+        # Handle reference images for I2I
+        source_image_urls = []
+        strength = None
+        if request.reference_images:
+            self._pending_images = getattr(self, '_pending_images', {})
+            pil_images, urls = self._load_reference_images(request, job_id)
+            self._pending_images[job_id] = pil_images
+            source_image_urls = urls
+            strength = request.strength
+
         job = Job(
-            id=str(uuid.uuid4()),
+            id=job_id,
             session_id=request.session_id,
             status=JobStatus.QUEUED,
             progress=0.0,
@@ -126,6 +178,8 @@ class JobManager:
             height=request.height,
             steps=steps,
             num_images=request.num_images,
+            source_image_urls=source_image_urls,
+            strength=strength,
             batch_id=request.batch_id or str(uuid.uuid4()),
             created_at=datetime.utcnow(),
             eta_seconds=self._estimate_time(request.model, steps, request.num_images, include_model_load=True),
@@ -234,6 +288,22 @@ class JobManager:
 
             images_results = []
 
+            # Check for I2I mode: retrieve pending reference images
+            self._pending_images = getattr(self, '_pending_images', {})
+            ref_images = self._pending_images.pop(job_id, None)
+            is_i2i = bool(job.source_image_urls)
+
+            # If I2I but images lost (e.g. server restart), reload from saved files
+            if is_i2i and not ref_images:
+                ref_images = []
+                for url in job.source_image_urls:
+                    # url is like /outputs/{job_id}_source_0.png
+                    file_path = output_dir / url.split("/")[-1]
+                    if file_path.exists():
+                        ref_images.append(Image.open(file_path))
+                if not ref_images:
+                    is_i2i = False  # Fall back to T2I if images can't be loaded
+
             for i in range(job.num_images):
                 # Update progress
                 progress = (i / job.num_images) * 100
@@ -248,15 +318,30 @@ class JobManager:
 
                 image_seed = base_seed + i
 
-                image, actual_seed = service.generate(
-                    prompt=job.prompt,
-                    model_id=job.model,
-                    width=job.width,
-                    height=job.height,
-                    steps=job.steps,
-                    guidance_scale=guidance,
-                    seed=image_seed,
-                )
+                if is_i2i and ref_images:
+                    # Image-to-Image generation
+                    image, actual_seed = service.generate_from_image(
+                        source_image=ref_images[0],  # Use first reference image
+                        prompt=job.prompt,
+                        model_id=job.model,
+                        width=job.width,
+                        height=job.height,
+                        steps=job.steps,
+                        guidance_scale=guidance,
+                        seed=image_seed,
+                        strength=job.strength or 0.75,
+                    )
+                else:
+                    # Text-to-Image generation
+                    image, actual_seed = service.generate(
+                        prompt=job.prompt,
+                        model_id=job.model,
+                        width=job.width,
+                        height=job.height,
+                        steps=job.steps,
+                        guidance_scale=guidance,
+                        seed=image_seed,
+                    )
 
                 # Save image
                 self._update_job(job_id, status=JobStatus.SAVING)
@@ -281,6 +366,11 @@ class JobManager:
                     "batch_id": job.batch_id,
                     "created_at": datetime.utcnow().isoformat(),
                 }
+
+                # Add I2I metadata if applicable
+                if is_i2i:
+                    metadata["source_image_urls"] = job.source_image_urls
+                    metadata["strength"] = job.strength
 
                 with open(metadata_path, "w") as f:
                     json.dump(metadata, f, indent=2)

@@ -10,6 +10,7 @@ from diffusers import (
     StableDiffusionPipeline,
     StableDiffusion3Pipeline,
     AutoPipelineForText2Image,
+    AutoPipelineForImage2Image,
     CogVideoXPipeline,
     CogVideoXImageToVideoPipeline,
     StableVideoDiffusionPipeline,
@@ -36,6 +37,7 @@ DownloadCallback = Callable[[float, float, float], None]  # (progress_pct, total
 class InferenceService:
     def __init__(self, config_path: str = "config.yaml"):
         self.config = self._load_config(config_path)
+        self.civitai_models: dict = self._load_civitai_models()
         self.current_model_id: Optional[str] = None
         self.pipeline = None
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -45,6 +47,20 @@ class InferenceService:
         config_file = Path(__file__).parent.parent.parent / config_path
         with open(config_file, "r") as f:
             return yaml.safe_load(f)
+
+    def _load_civitai_models(self) -> dict:
+        registry_file = Path(__file__).parent.parent.parent.parent / "data" / "civitai-models.json"
+        if registry_file.exists():
+            try:
+                import json
+                with open(registry_file, "r") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {}
+
+    def reload_civitai_models(self) -> None:
+        self.civitai_models = self._load_civitai_models()
 
     def get_available_models(self) -> list[dict]:
         models = []
@@ -64,16 +80,42 @@ class InferenceService:
                 "is_cached": self.is_model_cached(model_id),
                 "hf_path": model_config["path"],
             })
+        # Include Civitai models
+        self.reload_civitai_models()
+        for model_id, mc in self.civitai_models.items():
+            models.append({
+                "id": model_id,
+                "name": mc.get("name", model_id),
+                "type": mc.get("type", "sdxl"),
+                "default_steps": mc.get("default_steps", 20),
+                "default_guidance": mc.get("default_guidance", 7.0),
+                "category": "civitai",
+                "description": f"Civitai model ({mc.get('base_model', '')})",
+                "tags": ["civitai"],
+                "size_gb": 0,
+                "requires_approval": False,
+                "is_cached": self.is_model_cached(model_id),
+                "hf_path": mc.get("path", ""),
+            })
         return models
 
     def get_model_config(self, model_id: str) -> Optional[dict]:
-        return self.config["models"].get(model_id)
+        config = self.config["models"].get(model_id)
+        if config:
+            return config
+        # Check civitai registry
+        self.reload_civitai_models()
+        return self.civitai_models.get(model_id)
 
     def is_model_cached(self, model_id: str) -> bool:
         """Check if a model is already downloaded/cached."""
         model_config = self.get_model_config(model_id)
         if not model_config:
             return False
+
+        # Civitai single-file models: check if local path exists
+        if model_config.get("single_file"):
+            return Path(model_config["path"]).exists()
 
         model_path = model_config["path"]
 
@@ -177,8 +219,37 @@ class InferenceService:
         print(f"Loading model: {model_config['name']} ({model_path})")
 
         # Load the new pipeline first before clearing the old one
+        is_single_file = model_config.get("single_file", False)
+
         try:
-            if model_type == "flux":
+            if is_single_file:
+                # Civitai single .safetensors file loading
+                if model_type == "sdxl":
+                    new_pipeline = StableDiffusionXLPipeline.from_single_file(
+                        model_path,
+                        torch_dtype=self.dtype,
+                        use_safetensors=True,
+                    )
+                elif model_type == "sd":
+                    new_pipeline = StableDiffusionPipeline.from_single_file(
+                        model_path,
+                        torch_dtype=self.dtype,
+                        use_safetensors=True,
+                    )
+                elif model_type == "sd3":
+                    new_pipeline = StableDiffusion3Pipeline.from_single_file(
+                        model_path,
+                        torch_dtype=self.dtype,
+                        use_safetensors=True,
+                    )
+                elif model_type == "flux":
+                    new_pipeline = FluxPipeline.from_single_file(
+                        model_path,
+                        torch_dtype=self.dtype,
+                    )
+                else:
+                    raise ValueError(f"Single-file loading not supported for type: {model_type}")
+            elif model_type == "flux":
                 new_pipeline = FluxPipeline.from_pretrained(
                     model_path,
                     torch_dtype=self.dtype,
@@ -311,6 +382,72 @@ class InferenceService:
                 gen_kwargs["guidance_scale"] = guidance_scale
 
         image = self.pipeline(**gen_kwargs).images[0]
+        return image, seed
+
+    def generate_from_image(
+        self,
+        source_image: Image.Image,
+        prompt: str,
+        model_id: str,
+        negative_prompt: Optional[str] = None,
+        width: int = 1024,
+        height: int = 1024,
+        steps: Optional[int] = None,
+        guidance_scale: Optional[float] = None,
+        seed: Optional[int] = None,
+        strength: float = 0.75,
+        loras: Optional[list] = None,
+    ) -> tuple[Image.Image, int]:
+        """Generate an image from a source image (Image-to-Image).
+
+        Uses AutoPipelineForImage2Image.from_pipe() to share weights with the
+        loaded T2I pipeline -- no model reload needed.
+        """
+        self.load_model(model_id)
+
+        model_config = self.get_model_config(model_id)
+        model_type = model_config["type"]
+
+        if steps is None:
+            steps = model_config["default_steps"]
+        if guidance_scale is None:
+            guidance_scale = model_config["default_guidance"]
+        if seed is None:
+            seed = random.randint(0, 2**32 - 1)
+
+        # Create I2I pipeline from existing T2I pipeline (shares weights)
+        i2i_pipeline = AutoPipelineForImage2Image.from_pipe(self.pipeline)
+        i2i_pipeline.to(self.device)
+
+        # Apply LoRAs if provided and model supports them
+        if loras and model_type in ["flux", "sdxl", "sd", "sd3"]:
+            from .lora_manager import get_lora_manager
+            lora_manager = get_lora_manager()
+            lora_manager.apply_loras(i2i_pipeline, loras, model_type)
+
+        # Resize source image to target dimensions
+        source_image = source_image.convert("RGB").resize((width, height), Image.LANCZOS)
+
+        generator = torch.Generator(device=self.device).manual_seed(seed)
+
+        # Build generation kwargs
+        gen_kwargs = {
+            "prompt": prompt,
+            "image": source_image,
+            "strength": strength,
+            "num_inference_steps": steps,
+            "generator": generator,
+        }
+
+        if model_type != "flux":
+            gen_kwargs["guidance_scale"] = guidance_scale
+            if negative_prompt:
+                gen_kwargs["negative_prompt"] = negative_prompt
+        else:
+            if guidance_scale > 0:
+                gen_kwargs["guidance_scale"] = guidance_scale
+
+        image = i2i_pipeline(**gen_kwargs).images[0]
         return image, seed
 
     def generate_video(

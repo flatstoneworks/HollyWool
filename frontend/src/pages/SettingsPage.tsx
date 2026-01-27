@@ -1,20 +1,17 @@
-import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Settings, ScrollText, Info, Cpu, Palette, ChevronLeft, ChevronRight,
-  Loader2, Trash2, CheckCircle, AlertCircle, Sun, Moon, Monitor,
-  Image as ImageIcon, Video, Wand2
+  Settings, Info, Cpu, Palette,
+  Loader2, CheckCircle, Sun, Moon, Monitor, Wand2
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { api, AppSettings, RequestLog, SystemInfo, ThemeOption } from '@/api/client'
+import { api, ThemeOption } from '@/api/client'
 import { useTheme } from '@/contexts/ThemeContext'
 
-type SettingsSection = 'appearance' | 'logs' | 'system' | 'about'
+type SettingsSection = 'appearance' | 'system' | 'about'
 
 const sections: { id: SettingsSection; label: string; icon: typeof Settings }[] = [
   { id: 'appearance', label: 'Appearance', icon: Palette },
-  { id: 'logs', label: 'Request Logs', icon: ScrollText },
   { id: 'system', label: 'System', icon: Cpu },
   { id: 'about', label: 'About', icon: Info },
 ]
@@ -22,8 +19,6 @@ const sections: { id: SettingsSection; label: string; icon: typeof Settings }[] 
 export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const currentSection = (searchParams.get('section') as SettingsSection) || 'appearance'
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const queryClient = useQueryClient()
 
   const setSection = (section: SettingsSection) => {
     setSearchParams({ section })
@@ -32,29 +27,7 @@ export default function SettingsPage() {
   return (
     <div className="flex h-full">
       {/* Sidebar */}
-      <div
-        className={cn(
-          'flex flex-col border-r border-border bg-card transition-all duration-200',
-          sidebarCollapsed ? 'w-14' : 'w-56'
-        )}
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          {!sidebarCollapsed && (
-            <h2 className="text-sm font-medium">Settings</h2>
-          )}
-          <button
-            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-            className={cn("p-1 hover:bg-accent rounded", sidebarCollapsed && "mx-auto")}
-          >
-            {sidebarCollapsed ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <ChevronLeft className="h-4 w-4" />
-            )}
-          </button>
-        </div>
-
+      <div className="flex flex-col border-r border-border bg-card w-56">
         {/* Navigation */}
         <nav className="flex-1 p-2 space-y-1">
           {sections.map((section) => {
@@ -71,7 +44,7 @@ export default function SettingsPage() {
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                {!sidebarCollapsed && <span>{section.label}</span>}
+                <span>{section.label}</span>
               </button>
             )
           })}
@@ -82,7 +55,6 @@ export default function SettingsPage() {
       <div className="flex-1 overflow-auto">
         <div className="max-w-4xl mx-auto p-6">
           {currentSection === 'appearance' && <AppearanceSection />}
-          {currentSection === 'logs' && <LogsSection />}
           {currentSection === 'system' && <SystemSection />}
           {currentSection === 'about' && <AboutSection />}
         </div>
@@ -96,7 +68,7 @@ function AppearanceSection() {
   const { theme, setTheme } = useTheme()
   const queryClient = useQueryClient()
 
-  const { data: settings, isLoading } = useQuery({
+  const { data: settings } = useQuery({
     queryKey: ['settings'],
     queryFn: api.getSettings,
   })
@@ -193,250 +165,6 @@ function AppearanceSection() {
               />
             </label>
           </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ============== Logs Section ==============
-function LogsSection() {
-  const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null)
-  const [page, setPage] = useState(1)
-  const [typeFilter, setTypeFilter] = useState<string | undefined>(undefined)
-  const queryClient = useQueryClient()
-
-  const { data: logsData, isLoading, refetch } = useQuery({
-    queryKey: ['request-logs', page, typeFilter],
-    queryFn: () => api.getRequestLogs({ page, page_size: 50, type: typeFilter }),
-    refetchInterval: 5000,
-  })
-
-  const clearLogs = useMutation({
-    mutationFn: api.clearRequestLogs,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['request-logs'] })
-      setSelectedLog(null)
-    },
-  })
-
-  const deleteLog = useMutation({
-    mutationFn: api.deleteRequestLog,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['request-logs'] })
-      setSelectedLog(null)
-    },
-  })
-
-  const getTypeIcon = (type: string) => {
-    switch (type) {
-      case 'image': return <ImageIcon className="h-4 w-4" />
-      case 'video': return <Video className="h-4 w-4" />
-      case 'i2v': return <Wand2 className="h-4 w-4" />
-      default: return <ImageIcon className="h-4 w-4" />
-    }
-  }
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'completed': return 'text-green-500'
-      case 'failed': return 'text-red-500'
-      case 'generating': return 'text-blue-500'
-      default: return 'text-yellow-500'
-    }
-  }
-
-  const formatDuration = (ms: number | null) => {
-    if (!ms) return '-'
-    if (ms < 1000) return `${ms}ms`
-    return `${(ms / 1000).toFixed(2)}s`
-  }
-
-  const formatDate = (timestamp: string) => {
-    const date = new Date(timestamp)
-    return date.toLocaleString()
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-xl font-semibold">Request Logs</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            View history of all generation requests ({logsData?.total ?? 0} total)
-          </p>
-        </div>
-        <button
-          onClick={() => clearLogs.mutate()}
-          disabled={clearLogs.isPending || !logsData?.logs.length}
-          className="flex items-center gap-2 px-3 py-2 text-sm bg-destructive/10 text-destructive hover:bg-destructive/20 rounded-lg disabled:opacity-50"
-        >
-          {clearLogs.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-          Clear All
-        </button>
-      </div>
-
-      {/* Filters */}
-      <div className="flex gap-2">
-        {['all', 'image', 'video', 'i2v'].map((type) => (
-          <button
-            key={type}
-            onClick={() => setTypeFilter(type === 'all' ? undefined : type)}
-            className={cn(
-              'px-3 py-1.5 text-sm rounded-lg transition-colors',
-              (type === 'all' && !typeFilter) || typeFilter === type
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:bg-accent'
-            )}
-          >
-            {type === 'all' ? 'All' : type.charAt(0).toUpperCase() + type.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex gap-4 h-[600px]">
-        {/* Log List */}
-        <div className="w-96 bg-card rounded-lg border border-border overflow-hidden flex flex-col">
-          <div className="flex-1 overflow-auto">
-            {isLoading ? (
-              <div className="flex items-center justify-center h-full">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              </div>
-            ) : !logsData?.logs.length ? (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                <ScrollText className="h-12 w-12 mb-2 opacity-50" />
-                <p>No logs yet</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {logsData.logs.map((log) => (
-                  <button
-                    key={log.id}
-                    onClick={() => setSelectedLog(log)}
-                    className={cn(
-                      'w-full text-left p-3 hover:bg-accent/50 transition-colors',
-                      selectedLog?.id === log.id && 'bg-accent'
-                    )}
-                  >
-                    <div className="flex items-center gap-2 mb-1">
-                      {getTypeIcon(log.type)}
-                      <span className="font-medium text-sm truncate flex-1">{log.model}</span>
-                      <span className={cn('text-xs', getStatusColor(log.status))}>
-                        {log.status}
-                      </span>
-                    </div>
-                    <p className="text-xs text-muted-foreground line-clamp-1">{log.prompt}</p>
-                    <div className="flex items-center gap-2 mt-1 text-xs text-muted-foreground">
-                      <span>{formatDate(log.timestamp)}</span>
-                      {log.duration_ms && <span>({formatDuration(log.duration_ms)})</span>}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Pagination */}
-          {logsData && logsData.total > 50 && (
-            <div className="border-t border-border p-2 flex items-center justify-between text-sm">
-              <button
-                onClick={() => setPage(p => Math.max(1, p - 1))}
-                disabled={page === 1}
-                className="px-2 py-1 hover:bg-accent rounded disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <span className="text-muted-foreground">
-                Page {page} of {Math.ceil(logsData.total / 50)}
-              </span>
-              <button
-                onClick={() => setPage(p => p + 1)}
-                disabled={page * 50 >= logsData.total}
-                className="px-2 py-1 hover:bg-accent rounded disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Log Details */}
-        <div className="flex-1 bg-card rounded-lg border border-border overflow-hidden">
-          {selectedLog ? (
-            <div className="h-full flex flex-col">
-              <div className="p-4 border-b border-border flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {getTypeIcon(selectedLog.type)}
-                  <span className="font-medium">{selectedLog.model}</span>
-                  <span className={cn('text-sm', getStatusColor(selectedLog.status))}>
-                    {selectedLog.status === 'completed' && <CheckCircle className="h-4 w-4 inline mr-1" />}
-                    {selectedLog.status === 'failed' && <AlertCircle className="h-4 w-4 inline mr-1" />}
-                    {selectedLog.status}
-                  </span>
-                </div>
-                <button
-                  onClick={() => deleteLog.mutate(selectedLog.id)}
-                  className="p-2 hover:bg-destructive/10 text-destructive rounded"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-auto p-4 space-y-4">
-                <div>
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase mb-1">Timestamp</h4>
-                  <p className="text-sm">{formatDate(selectedLog.timestamp)}</p>
-                </div>
-
-                {selectedLog.duration_ms && (
-                  <div>
-                    <h4 className="text-xs font-medium text-muted-foreground uppercase mb-1">Duration</h4>
-                    <p className="text-sm">{formatDuration(selectedLog.duration_ms)}</p>
-                  </div>
-                )}
-
-                <div>
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase mb-1">Prompt</h4>
-                  <pre className="text-sm bg-muted/50 p-3 rounded-lg whitespace-pre-wrap font-mono">{selectedLog.prompt}</pre>
-                </div>
-
-                {selectedLog.negative_prompt && (
-                  <div>
-                    <h4 className="text-xs font-medium text-muted-foreground uppercase mb-1">Negative Prompt</h4>
-                    <pre className="text-sm bg-muted/50 p-3 rounded-lg whitespace-pre-wrap font-mono">{selectedLog.negative_prompt}</pre>
-                  </div>
-                )}
-
-                <div>
-                  <h4 className="text-xs font-medium text-muted-foreground uppercase mb-1">Parameters</h4>
-                  <pre className="text-sm bg-muted/50 p-3 rounded-lg whitespace-pre-wrap font-mono">
-                    {JSON.stringify(selectedLog.parameters, null, 2)}
-                  </pre>
-                </div>
-
-                {selectedLog.error && (
-                  <div>
-                    <h4 className="text-xs font-medium text-muted-foreground uppercase mb-1">Error</h4>
-                    <pre className="text-sm bg-red-500/10 text-red-500 p-3 rounded-lg whitespace-pre-wrap font-mono">
-                      {selectedLog.error}
-                    </pre>
-                  </div>
-                )}
-
-                {selectedLog.result_id && (
-                  <div>
-                    <h4 className="text-xs font-medium text-muted-foreground uppercase mb-1">Result ID</h4>
-                    <p className="text-sm font-mono">{selectedLog.result_id}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
-              <ScrollText className="h-12 w-12 mb-2 opacity-50" />
-              <p>Select a log to view details</p>
-            </div>
-          )}
         </div>
       </div>
     </div>

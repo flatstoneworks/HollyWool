@@ -4,7 +4,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   Loader2, Sparkles, ChevronDown, Wand2, Download, Copy,
   RefreshCw, Trash2, Palette, Plus, Minus, MessageSquare,
-  MoreHorizontal, Pencil, GripVertical, Square, Layers
+  MoreHorizontal, Pencil, GripVertical, Square, Layers,
+  Image as ImageIcon, X, Upload
 } from 'lucide-react'
 import { api, type ModelInfo, type Asset, type Job, type LoRAInfo, groupAssetsByBatch } from '@/api/client'
 import { cn } from '@/lib/utils'
@@ -55,6 +56,11 @@ export function ImagePage() {
   const [selectedLoras, setSelectedLoras] = useState<{ id: string; name: string; weight: number }[]>([])
   const [availableLoras, setAvailableLoras] = useState<LoRAInfo[]>([])
   const [hoveredImage, setHoveredImage] = useState<string | null>(null)
+
+  // Reference images for I2I
+  const [referenceImages, setReferenceImages] = useState<{file: File, preview: string}[]>([])
+  const [strength, setStrength] = useState(0.75)
+  const refImageInputRef = useRef<HTMLInputElement>(null)
 
   // Session management
   const [sessions, setSessions] = useState<Session[]>([])
@@ -153,7 +159,8 @@ export function ImagePage() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return
-      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX))
+      const navWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nav-sidebar-width')) || 56
+      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX - navWidth))
       setSidebarWidth(newWidth)
     }
 
@@ -340,6 +347,16 @@ export function ImagePage() {
     const fullPrompt = selectedStyleInfo.prefix + prompt.trim()
 
     try {
+      // Build reference_images array if any
+      let reference_images: { image_base64: string }[] | undefined
+      if (referenceImages.length > 0) {
+        reference_images = []
+        for (const ref of referenceImages) {
+          const base64 = await fileToBase64(ref.file)
+          reference_images.push({ image_base64: base64 })
+        }
+      }
+
       const response = await api.createJob({
         prompt: fullPrompt,
         model: selectedModel,
@@ -350,6 +367,8 @@ export function ImagePage() {
         loras: selectedLoras.length > 0
           ? selectedLoras.map(l => ({ lora_id: l.id, weight: l.weight }))
           : undefined,
+        reference_images,
+        strength: reference_images ? strength : undefined,
       })
 
       // Fetch the job details and track it by job ID
@@ -414,6 +433,44 @@ export function ImagePage() {
       e.preventDefault()
       handleGenerate()
     }
+  }
+
+  // Reference image handlers
+  const handleRefImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    const remaining = 5 - referenceImages.length
+    const toAdd = files.slice(0, remaining)
+
+    for (const file of toAdd) {
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        setReferenceImages(prev => {
+          if (prev.length >= 5) return prev
+          return [...prev, { file, preview: reader.result as string }]
+        })
+      }
+      reader.readAsDataURL(file)
+    }
+
+    // Reset input so same file can be re-selected
+    if (refImageInputRef.current) refImageInputRef.current.value = ''
+  }
+
+  const removeReferenceImage = (index: number) => {
+    setReferenceImages(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const clearReferenceImages = () => {
+    setReferenceImages([])
+  }
+
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onloadend = () => resolve(reader.result as string)
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
   }
 
   // Count active jobs in queue (for limiting to 10)
@@ -889,6 +946,12 @@ export function ImagePage() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2">
+                      {job.source_image_urls && job.source_image_urls.length > 0 && (
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary flex items-center gap-1">
+                          <ImageIcon className="h-3 w-3" />
+                          I2I
+                        </span>
+                      )}
                       {sessionId !== currentSession?.id && (
                         <span className="text-xs px-2 py-0.5 rounded-full bg-accent text-muted-foreground">
                           {sessionName}
@@ -982,8 +1045,25 @@ export function ImagePage() {
                   ))}
                 </div>
 
-                {/* Show prompt */}
+                {/* Show prompt and source images */}
                 <div className="px-4 py-3 border-t border-border">
+                  {job.source_image_urls && job.source_image_urls.length > 0 && (
+                    <div className="flex items-center gap-2 mb-2">
+                      {job.source_image_urls.map((url, idx) => (
+                        <img
+                          key={idx}
+                          src={url}
+                          alt={`Source ${idx + 1}`}
+                          className="h-10 w-10 rounded object-cover"
+                        />
+                      ))}
+                      {job.strength !== null && job.strength !== undefined && (
+                        <span className="text-xs text-muted-foreground/70 ml-1">
+                          Strength: {job.strength.toFixed(2)}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   <p className="text-sm text-muted-foreground">{job.prompt}</p>
                 </div>
               </div>
@@ -1008,7 +1088,7 @@ export function ImagePage() {
         {/* Fixed Bottom Prompt Bar */}
         <div
           className="fixed bottom-0 right-0 p-4 z-40 bg-gradient-to-t from-background via-background to-transparent pt-12"
-          style={{ left: sidebarWidth }}
+          style={{ left: `calc(var(--nav-sidebar-width, 0px) + ${sidebarWidth}px)` }}
         >
           <div className="max-w-3xl mx-auto">
             <div className="glass rounded-2xl p-3">
@@ -1337,7 +1417,88 @@ export function ImagePage() {
                     <Plus className="h-4 w-4" />
                   </button>
                 </div>
+
+                <div className="h-5 w-px bg-accent" />
+
+                {/* Ref Image Button */}
+                <button
+                  onClick={() => refImageInputRef.current?.click()}
+                  className={cn(
+                    'model-pill',
+                    referenceImages.length > 0 && 'bg-primary/20 text-primary'
+                  )}
+                >
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  <span>{referenceImages.length > 0 ? `${referenceImages.length} Ref` : 'Ref Image'}</span>
+                </button>
+                <input
+                  ref={refImageInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handleRefImageUpload}
+                  className="hidden"
+                />
               </div>
+
+              {/* Reference images strip */}
+              {referenceImages.length > 0 && (
+                <div className="mb-3 px-1">
+                  <div className="p-3 rounded-xl bg-muted">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-medium text-muted-foreground/70 uppercase tracking-wider">Reference Images</span>
+                      <span className="text-xs text-muted-foreground/50">({referenceImages.length}/5)</span>
+                      <button
+                        onClick={clearReferenceImages}
+                        className="ml-auto text-xs text-red-400 hover:text-red-300 transition-colors"
+                      >
+                        Clear all
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {referenceImages.map((ref, i) => (
+                        <div key={i} className="relative group/ref">
+                          <img
+                            src={ref.preview}
+                            alt={`Ref ${i + 1}`}
+                            className="w-16 h-16 rounded-lg object-cover"
+                          />
+                          <button
+                            onClick={() => removeReferenceImage(i)}
+                            className="absolute -top-1.5 -right-1.5 p-0.5 rounded-full bg-red-500 hover:bg-red-600 opacity-0 group-hover/ref:opacity-100 transition-opacity"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
+                      ))}
+                      {referenceImages.length < 5 && (
+                        <button
+                          onClick={() => refImageInputRef.current?.click()}
+                          className="w-16 h-16 rounded-lg border-2 border-dashed border-white/20 hover:border-primary/50 flex items-center justify-center transition-colors"
+                        >
+                          <Plus className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      )}
+                    </div>
+                    {/* Strength slider */}
+                    <div className="mt-3 flex items-center gap-3">
+                      <span className="text-xs text-muted-foreground/70 w-14">Strength:</span>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="1.0"
+                        step="0.05"
+                        value={strength}
+                        onChange={(e) => setStrength(parseFloat(e.target.value))}
+                        className="flex-1 h-1 bg-accent rounded-full appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-primary"
+                      />
+                      <span className="text-xs text-muted-foreground w-8 text-right font-mono">
+                        {strength.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Prompt input row */}
               <div className="flex items-end gap-3">

@@ -44,6 +44,11 @@ export interface LoRAScanResponse {
   loras: LoRAInfo[]
 }
 
+export interface ReferenceImage {
+  image_base64?: string
+  image_asset_id?: string
+}
+
 export interface GenerateRequest {
   prompt: string
   model: string
@@ -56,6 +61,8 @@ export interface GenerateRequest {
   num_images?: number
   batch_id?: string
   loras?: LoRAApply[]
+  reference_images?: ReferenceImage[]
+  strength?: number
 }
 
 export interface ImageResult {
@@ -252,6 +259,9 @@ export interface Job {
   height: number
   steps: number
   num_images: number
+  // I2I fields
+  source_image_urls: string[]
+  strength: number | null
   batch_id: string | null
   images: ImageResult[]
   created_at: string
@@ -417,6 +427,7 @@ export interface I2VGenerateRequest {
   model: string
   image_base64?: string
   image_asset_id?: string
+  reference_images?: ReferenceImage[]
   negative_prompt?: string
   num_frames?: number
   fps?: number
@@ -444,7 +455,7 @@ export interface I2VJob {
   download_speed_mbps: number | null
   prompt: string
   model: string
-  source_image_url: string
+  source_image_urls: string[]
   width: number
   height: number
   steps: number
@@ -577,6 +588,105 @@ export interface TestConnectionResponse {
   success: boolean
   message: string
   error?: string
+}
+
+// ============== Civitai Types ==============
+
+export interface CivitaiModelImage {
+  url?: string
+  nsfw?: string
+  width?: number
+  height?: number
+}
+
+export interface CivitaiModelFile {
+  id?: number
+  name?: string
+  sizeKB?: number
+  type?: string
+}
+
+export interface CivitaiModelVersion {
+  id: number
+  name: string
+  baseModel?: string
+  downloadUrl?: string
+  files: CivitaiModelFile[]
+  images: CivitaiModelImage[]
+}
+
+export interface CivitaiModelStats {
+  downloadCount?: number
+  favoriteCount?: number
+  thumbsUpCount?: number
+  thumbsDownCount?: number
+  commentCount?: number
+  ratingCount?: number
+  rating?: number
+}
+
+export interface CivitaiCreator {
+  username?: string
+  image?: string
+}
+
+export interface CivitaiModelSummary {
+  id: number
+  name: string
+  type?: string
+  tags: string[]
+  stats?: CivitaiModelStats
+  creator?: CivitaiCreator
+  modelVersions: CivitaiModelVersion[]
+  nsfw?: boolean
+  description?: string
+}
+
+export interface CivitaiSearchResponse {
+  items: CivitaiModelSummary[]
+  metadata?: {
+    nextCursor?: string
+    nextPage?: string
+    currentPage?: number
+    pageSize?: number
+    totalItems?: number
+    totalPages?: number
+  }
+}
+
+export interface CivitaiDownloadRequest {
+  civitai_model_id: number
+  version_id: number
+  model_name: string
+  type: string
+  filename: string
+  download_url: string
+  base_model?: string
+  file_size_kb?: number
+}
+
+export type CivitaiDownloadStatus = 'queued' | 'downloading' | 'completed' | 'failed' | 'cancelled'
+
+export interface CivitaiDownloadJob {
+  id: string
+  civitai_model_id: number
+  version_id: number
+  model_name: string
+  type: string
+  filename: string
+  download_url: string
+  base_model?: string
+  file_size_kb?: number
+  status: CivitaiDownloadStatus
+  progress: number
+  downloaded_bytes: number
+  total_bytes: number
+  speed_bytes_per_sec: number
+  error?: string
+  local_path?: string
+  created_at: string
+  started_at?: string
+  completed_at?: string
 }
 
 export const api = {
@@ -985,5 +1095,68 @@ export const api = {
     const res = await fetch(`${API_BASE}/settings/system`)
     if (!res.ok) throw new Error('Failed to fetch system info')
     return res.json()
+  },
+
+  // ============== Civitai Endpoints ==============
+
+  async searchCivitaiModels(params?: {
+    query?: string
+    types?: string
+    sort?: string
+    nsfw?: boolean
+    base_models?: string
+    limit?: number
+    cursor?: string
+  }): Promise<CivitaiSearchResponse> {
+    const searchParams = new URLSearchParams()
+    if (params?.query) searchParams.set('query', params.query)
+    if (params?.types) searchParams.set('types', params.types)
+    if (params?.sort) searchParams.set('sort', params.sort)
+    if (params?.nsfw !== undefined) searchParams.set('nsfw', params.nsfw.toString())
+    if (params?.base_models) searchParams.set('base_models', params.base_models)
+    if (params?.limit) searchParams.set('limit', params.limit.toString())
+    if (params?.cursor) searchParams.set('cursor', params.cursor)
+    const url = `${API_BASE}/civitai/models${searchParams.toString() ? `?${searchParams}` : ''}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Failed to search Civitai models')
+    return res.json()
+  },
+
+  async getCivitaiModel(modelId: number): Promise<CivitaiModelSummary> {
+    const res = await fetch(`${API_BASE}/civitai/models/${modelId}`)
+    if (!res.ok) throw new Error('Failed to fetch Civitai model')
+    return res.json()
+  },
+
+  async startCivitaiDownload(request: CivitaiDownloadRequest): Promise<CivitaiDownloadJob> {
+    const res = await fetch(`${API_BASE}/civitai/downloads`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Failed to start download' }))
+      throw new Error(error.detail || 'Failed to start download')
+    }
+    return res.json()
+  },
+
+  async getCivitaiDownloads(): Promise<CivitaiDownloadJob[]> {
+    const res = await fetch(`${API_BASE}/civitai/downloads`)
+    if (!res.ok) throw new Error('Failed to fetch downloads')
+    return res.json()
+  },
+
+  async getCivitaiDownloadedVersions(): Promise<number[]> {
+    const res = await fetch(`${API_BASE}/civitai/downloaded-versions`)
+    if (!res.ok) throw new Error('Failed to fetch downloaded versions')
+    return res.json()
+  },
+
+  async cancelCivitaiDownload(jobId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/civitai/downloads/${jobId}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error('Failed to cancel download')
   },
 }

@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    --nav-sidebar-width: 56px;
     --background: 0 0% 98%;
     --foreground: 240 10% 3.9%;
     --card: 0 0% 100%;
@@ -260,5 +261,17 @@
 
   .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
     background-color: rgba(255,255,255,0.2);
+  }
+
+  /* Nav sidebar tooltip */
+  .nav-tooltip {
+    @apply pointer-events-none absolute left-full ml-2 px-2 py-1 rounded-md text-xs font-medium whitespace-nowrap;
+    @apply opacity-0 translate-x-1 transition-all duration-150;
+    background-color: hsl(var(--foreground));
+    color: hsl(var(--background));
+  }
+
+  .group:hover .nav-tooltip {
+    @apply opacity-100 translate-x-0;
   }
 }

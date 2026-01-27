@@ -383,8 +383,8 @@ export function VideoPage() {
               return next
             })
             // Use source image as thumbnail for I2V (it's an actual image, not video)
-            if (updatedJob.source_image_url) {
-              updateVideoSession(updatedJob.session_id, { thumbnail: updatedJob.source_image_url })
+            if (updatedJob.source_image_urls?.[0]) {
+              updateVideoSession(updatedJob.session_id, { thumbnail: updatedJob.source_image_urls[0] })
               setSessions(getVideoSessions())
             }
           } else if (updatedJob.status === 'failed') {
@@ -421,7 +421,8 @@ export function VideoPage() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return
-      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX))
+      const navWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nav-sidebar-width')) || 56
+      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX - navWidth))
       setSidebarWidth(newWidth)
     }
 
@@ -521,7 +522,7 @@ export function VideoPage() {
         const request: I2VGenerateRequest = {
           prompt: fullPrompt,
           model: selectedModel,
-          image_base64: imageBase64,
+          reference_images: [{ image_base64: imageBase64 }],
           width,
           height,
           session_id: currentSession.id,
@@ -780,9 +781,9 @@ export function VideoPage() {
                       )}
                     </p>
                   </div>
-                  {job.source_image_url && (
+                  {job.source_image_urls?.[0] && (
                     <img
-                      src={job.source_image_url}
+                      src={job.source_image_urls?.[0]}
                       alt="Source"
                       className="h-16 w-auto rounded-lg object-cover"
                     />
@@ -859,11 +860,11 @@ export function VideoPage() {
                   job.video && (
                     <div key={job.id} className="rounded-xl glass overflow-hidden">
                       <div className="flex items-start gap-4 p-4 border-b border-border">
-                        {job.source_image_url && (
+                        {job.source_image_urls?.[0] && (
                           <div className="flex-shrink-0">
                             <p className="text-[10px] text-muted-foreground/70 mb-1">Source</p>
                             <img
-                              src={job.source_image_url}
+                              src={job.source_image_urls?.[0]}
                               alt="Source"
                               className="h-16 w-auto rounded-lg object-cover"
                             />
@@ -976,7 +977,7 @@ export function VideoPage() {
         {/* Fixed Bottom Prompt Bar */}
         <div
           className="fixed bottom-0 right-0 p-4 z-40 bg-gradient-to-t from-background via-background to-transparent pt-12"
-          style={{ left: sidebarWidth }}
+          style={{ left: `calc(var(--nav-sidebar-width, 0px) + ${sidebarWidth}px)` }}
         >
           <div className="max-w-3xl mx-auto">
             <div className="glass rounded-2xl p-3">

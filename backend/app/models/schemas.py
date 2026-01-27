@@ -13,6 +13,12 @@ class ModelInfo(BaseModel):
 
 # ============== LoRA Schemas ==============
 
+class ReferenceImage(BaseModel):
+    """A reference image for img2img or I2V workflows."""
+    image_base64: Optional[str] = Field(default=None)
+    image_asset_id: Optional[str] = Field(default=None)
+
+
 class LoRAApply(BaseModel):
     """Request to apply a LoRA with a specific weight."""
     lora_id: str
@@ -56,6 +62,8 @@ class GenerateRequest(BaseModel):
     batch_id: Optional[str] = Field(default=None)  # Groups images from same generation
     session_id: Optional[str] = Field(default=None)  # Link generation to session
     loras: Optional[list[LoRAApply]] = Field(default=None)  # LoRAs to apply with weights
+    reference_images: Optional[list[ReferenceImage]] = Field(default=None)  # Up to 5 reference images for I2I
+    strength: Optional[float] = Field(default=0.75, ge=0.0, le=1.0)  # I2I denoising strength
 
 
 class ImageResult(BaseModel):
@@ -96,6 +104,9 @@ class Job(BaseModel):
     height: int
     steps: int
     num_images: int
+    # I2I fields
+    source_image_urls: list[str] = []
+    strength: Optional[float] = None
     # Result
     batch_id: Optional[str] = None
     images: list[ImageResult] = []
@@ -323,8 +334,9 @@ class I2VGenerateRequest(BaseModel):
     """Request for image-to-video generation."""
     prompt: str = Field(..., min_length=1, max_length=2000)
     model: str = Field(default="cogvideox-5b-i2v")
-    image_base64: Optional[str] = Field(default=None)  # Direct base64 image upload
-    image_asset_id: Optional[str] = Field(default=None)  # Use existing asset as source
+    image_base64: Optional[str] = Field(default=None)  # Direct base64 image upload (legacy)
+    image_asset_id: Optional[str] = Field(default=None)  # Use existing asset as source (legacy)
+    reference_images: Optional[list[ReferenceImage]] = Field(default=None)  # New: array of reference images
     negative_prompt: Optional[str] = Field(default=None, max_length=2000)
     num_frames: Optional[int] = Field(default=None, ge=1, le=200)
     fps: Optional[int] = Field(default=None, ge=1, le=60)
@@ -356,7 +368,7 @@ class I2VJob(BaseModel):
     # Request details
     prompt: str
     model: str
-    source_image_url: str  # URL/path of the source image
+    source_image_urls: list[str] = []  # URL/paths of source images
     width: int
     height: int
     steps: int

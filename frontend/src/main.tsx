@@ -13,6 +13,7 @@ import { ModelDetailPage } from './pages/ModelDetailPage'
 import { AssetDetailPage } from './pages/AssetDetailPage'
 import { VideoAssetDetailPage } from './pages/VideoAssetDetailPage'
 import SettingsPage from './pages/SettingsPage'
+import RequestLogsPage from './pages/RequestLogsPage'
 import './index.css'
 
 const queryClient = new QueryClient({
@@ -36,6 +37,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
 
             {/* Main app with header */}
             <Route path="/" element={<Layout />}>
+              <Route path="logs" element={<RequestLogsPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route index element={<Navigate to="/image" replace />} />
               <Route path="image" element={<ImagePage />} />
