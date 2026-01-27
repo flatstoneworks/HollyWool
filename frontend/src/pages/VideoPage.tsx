@@ -121,7 +121,8 @@ export function VideoPage() {
     .filter(providerId => PREVIEW_MODELS[providerId]?.some(m => m.type === 'video'))
 
   const [prompt, setPrompt] = useState('')
-  const [selectedModel, setSelectedModel] = useState<string>('ltx-2')
+  const initialModel = searchParams.get('model') || 'ltx-2'
+  const [selectedModel, setSelectedModel] = useState<string>(initialModel)
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9')
   const [resolution, setResolution] = useState<Resolution>('720p')
   const [selectedStyle, setSelectedStyle] = useState('none')

@@ -21,9 +21,26 @@ class CivitaiClient:
             timeout=30.0,
             follow_redirects=True,
         )
+        self._update_auth()
         # In-memory response cache: key -> (timestamp, data)
         self._search_cache: dict[str, tuple[float, dict]] = {}
         self._model_cache: dict[int, tuple[float, dict]] = {}
+
+    def _update_auth(self) -> None:
+        """Load CivitAI API key from settings and update client headers."""
+        try:
+            from ..routers.settings import load_settings
+            settings = load_settings()
+            if settings.civitai_api_key:
+                self.client.headers["Authorization"] = f"Bearer {settings.civitai_api_key}"
+            elif "Authorization" in self.client.headers:
+                del self.client.headers["Authorization"]
+        except Exception:
+            pass
+
+    def refresh_auth(self) -> None:
+        """Refresh auth headers (call after settings change)."""
+        self._update_auth()
 
     def _is_fresh(self, entry: tuple[float, dict], ttl: float) -> bool:
         return (time.monotonic() - entry[0]) < ttl

@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueries, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { useUrlState, useClearUrlParams } from '@/hooks/useUrlState'
 import {
@@ -23,26 +23,39 @@ import {
   type ModelProvider,
 } from '@/types/providers'
 
-type SelectedView = 'curated' | 'civitai' | 'favorites' | ModelProvider
+type SelectedView = 'local-images' | 'local-videos' | 'civitai' | 'civitai-downloaded' | 'favorites' | ModelProvider
 type CategoryFilter = 'all' | 'fast' | 'quality' | 'specialized'
 type StatusFilter = 'all' | 'downloaded' | 'not-downloaded'
 
 const PROVIDER_IDS: ModelProvider[] = ['krea', 'higgsfield', 'fal']
 
+const VIDEO_MODEL_TYPES = ['video', 'ltx2', 'video-i2v', 'svd']
+
+function isVideoModel(model: ModelDetailedInfo): boolean {
+  return VIDEO_MODEL_TYPES.includes(model.type)
+}
+
+const VIDEO_BASE_MODEL_PREFIXES = ['Hunyuan', 'CogVideo', 'Wan', 'SVD', 'LTX']
+
+function isVideoBaseModel(baseModel?: string): boolean {
+  if (!baseModel) return false
+  return VIDEO_BASE_MODEL_PREFIXES.some(p => baseModel.includes(p))
+}
+
 export function ModelsPage() {
   const clearUrlParams = useClearUrlParams()
-  const [selectedView, setSelectedViewRaw] = useUrlState('view', 'curated') as [SelectedView, (v: string, opts?: { replace?: boolean }) => void]
+  const [selectedView, setSelectedViewRaw] = useUrlState('view', 'local-images') as [SelectedView, (v: string, opts?: { replace?: boolean }) => void]
   const [categoryFilter, setCategoryFilter] = useUrlState('category', 'all') as [CategoryFilter, (v: string, opts?: { replace?: boolean }) => void]
   const [statusFilter, setStatusFilter] = useUrlState('status', 'all') as [StatusFilter, (v: string, opts?: { replace?: boolean }) => void]
   // When switching views, clear view-specific params
   const setSelectedView = useCallback((view: SelectedView) => {
-    // Clear curated filters when leaving curated view
-    if (view !== 'curated') {
+    // Clear curated filters when leaving local views
+    if (view !== 'local-images' && view !== 'local-videos') {
       clearUrlParams(['category', 'status'])
     }
     // Clear civitai filters when leaving civitai view
     if (view !== 'civitai') {
-      clearUrlParams(['sort', 'civitaiType', 'base', 'contentCategory'])
+      clearUrlParams(['sort', 'civitaiType', 'base', 'contentCategory', 'q'])
     }
     setSelectedViewRaw(view)
   }, [clearUrlParams, setSelectedViewRaw])
@@ -59,6 +72,14 @@ export function ModelsPage() {
     queryKey: ['providers'],
     queryFn: api.getProviders,
   })
+
+  // CivitAI downloads (for sidebar count)
+  const { data: civitaiDownloads = [] } = useQuery({
+    queryKey: ['civitai-downloads'],
+    queryFn: api.getCivitaiDownloads,
+    refetchInterval: 10000,
+  })
+  const completedDownloadsCount = civitaiDownloads.filter(d => d.status === 'completed').length
 
   const { favorites, isFavorited, toggle: toggleFavorite } = useFavorites()
 
@@ -77,13 +98,6 @@ export function ModelsPage() {
     if (statusFilter === 'not-downloaded' && model.is_cached) return false
     return true
   })
-
-  // Group by category
-  const groupedModels = {
-    fast: filteredModels.filter(m => m.category === 'fast'),
-    quality: filteredModels.filter(m => m.category === 'quality'),
-    specialized: filteredModels.filter(m => m.category === 'specialized'),
-  }
 
   return (
     <div className="flex-1 flex overflow-hidden">
@@ -123,22 +137,40 @@ export function ModelsPage() {
               Local
             </span>
             <button
-              onClick={() => setSelectedView('curated')}
+              onClick={() => setSelectedView('local-images')}
               className={cn(
                 'w-full flex items-center justify-between mt-2 px-3 py-2 rounded-lg text-sm transition-colors',
-                selectedView === 'curated'
+                selectedView === 'local-images'
                   ? 'bg-primary/20 text-primary'
                   : 'text-white/70 hover:bg-white/5 hover:text-white'
               )}
             >
               <div className="flex items-center gap-2">
-                <span className={cn(
-                  'w-2 h-2 rounded-full',
-                  selectedView === 'curated' ? 'bg-primary' : 'bg-green-500'
+                <Image className={cn(
+                  'h-3.5 w-3.5',
+                  selectedView === 'local-images' ? 'text-primary' : 'text-white/50'
                 )} />
-                <span>Curated</span>
+                <span>Images</span>
               </div>
-              <span className="text-xs text-white/40">{models.length}</span>
+              <span className="text-xs text-white/40">{models.filter(m => !isVideoModel(m)).length}</span>
+            </button>
+            <button
+              onClick={() => setSelectedView('local-videos')}
+              className={cn(
+                'w-full flex items-center justify-between mt-1 px-3 py-2 rounded-lg text-sm transition-colors',
+                selectedView === 'local-videos'
+                  ? 'bg-primary/20 text-primary'
+                  : 'text-white/70 hover:bg-white/5 hover:text-white'
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <Video className={cn(
+                  'h-3.5 w-3.5',
+                  selectedView === 'local-videos' ? 'text-primary' : 'text-white/50'
+                )} />
+                <span>Videos</span>
+              </div>
+              <span className="text-xs text-white/40">{models.filter(m => isVideoModel(m)).length}</span>
             </button>
           </div>
 
@@ -160,6 +192,23 @@ export function ModelsPage() {
                 <Globe className="h-3.5 w-3.5" />
                 <span>Browse</span>
               </div>
+            </button>
+            <button
+              onClick={() => setSelectedView('civitai-downloaded')}
+              className={cn(
+                'w-full flex items-center justify-between mt-1 px-3 py-2 rounded-lg text-sm transition-colors',
+                selectedView === 'civitai-downloaded'
+                  ? 'bg-primary/20 text-primary'
+                  : 'text-white/70 hover:bg-white/5 hover:text-white'
+              )}
+            >
+              <div className="flex items-center gap-2">
+                <Check className="h-3.5 w-3.5" />
+                <span>Downloaded</span>
+              </div>
+              {completedDownloadsCount > 0 && (
+                <span className="text-xs text-white/40">{completedDownloadsCount}</span>
+              )}
             </button>
           </div>
 
@@ -222,11 +271,12 @@ export function ModelsPage() {
             isFavorited={isFavorited}
             onToggleFavorite={toggleFavorite}
           />
-        ) : selectedView === 'curated' ? (
+        ) : selectedView === 'local-images' ? (
           <CuratedView
+            mode="images"
             models={models}
             filteredModels={filteredModels}
-            groupedModels={groupedModels}
+
             isLoading={isLoading}
             categoryFilter={categoryFilter}
             setCategoryFilter={setCategoryFilter}
@@ -237,6 +287,24 @@ export function ModelsPage() {
             isFavorited={isFavorited}
             onToggleFavorite={toggleFavorite}
           />
+        ) : selectedView === 'local-videos' ? (
+          <CuratedView
+            mode="videos"
+            models={models}
+            filteredModels={filteredModels}
+
+            isLoading={isLoading}
+            categoryFilter={categoryFilter}
+            setCategoryFilter={setCategoryFilter}
+            statusFilter={statusFilter}
+            setStatusFilter={setStatusFilter}
+            totalCacheSize={totalCacheSize}
+            currentModel={modelsData?.current_model}
+            isFavorited={isFavorited}
+            onToggleFavorite={toggleFavorite}
+          />
+        ) : selectedView === 'civitai-downloaded' ? (
+          <CivitaiDownloadedView isFavorited={isFavorited} onToggleFavorite={toggleFavorite} />
         ) : selectedView === 'civitai' ? (
           <CivitaiView isFavorited={isFavorited} onToggleFavorite={toggleFavorite} />
         ) : (
@@ -255,9 +323,9 @@ export function ModelsPage() {
 // =============================================================================
 
 interface CuratedViewProps {
+  mode: 'images' | 'videos'
   models: ModelDetailedInfo[]
   filteredModels: ModelDetailedInfo[]
-  groupedModels: Record<string, ModelDetailedInfo[]>
   isLoading: boolean
   categoryFilter: CategoryFilter
   setCategoryFilter: (f: CategoryFilter) => void
@@ -270,9 +338,9 @@ interface CuratedViewProps {
 }
 
 function CuratedView({
+  mode,
   models,
   filteredModels,
-  groupedModels,
   isLoading,
   categoryFilter,
   setCategoryFilter,
@@ -282,6 +350,12 @@ function CuratedView({
   isFavorited,
   onToggleFavorite,
 }: CuratedViewProps) {
+  const isImages = mode === 'images'
+
+  // Filter models based on mode
+  const modeModels = models.filter(m => isImages ? !isVideoModel(m) : isVideoModel(m))
+  const modeFilteredModels = filteredModels.filter(m => isImages ? !isVideoModel(m) : isVideoModel(m))
+
   const getCategoryIcon = (category: string) => {
     switch (category) {
       case 'fast': return <Zap className="h-4 w-4" />
@@ -296,9 +370,26 @@ function CuratedView({
       case 'fast': return 'Fast Models (1-4 steps)'
       case 'quality': return 'Quality Models (20-50 steps)'
       case 'specialized': return 'Specialized Models'
+      case 't2v': return 'Text-to-Video'
+      case 'i2v': return 'Image-to-Video'
       default: return category
     }
   }
+
+  // Group video models by sub-type
+  const videoGroupedModels = {
+    t2v: modeFilteredModels.filter(m => ['video', 'ltx2'].includes(m.type)),
+    i2v: modeFilteredModels.filter(m => ['video-i2v', 'svd'].includes(m.type)),
+  }
+
+  // Group image models by existing categories
+  const imageGroupedModels = {
+    fast: modeFilteredModels.filter(m => m.category === 'fast'),
+    quality: modeFilteredModels.filter(m => m.category === 'quality'),
+    specialized: modeFilteredModels.filter(m => m.category === 'specialized'),
+  }
+
+  const activeGroupedModels = isImages ? imageGroupedModels : videoGroupedModels
 
   return (
     <>
@@ -306,29 +397,33 @@ function CuratedView({
       <div className="flex-shrink-0 px-6 py-4 border-b border-white/5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold text-white">Models</h1>
+            <h1 className="text-xl font-semibold text-white">
+              {isImages ? 'Image Models' : 'Video Models'}
+            </h1>
             <p className="text-sm text-white/50 mt-1">
-              {models.filter(m => m.is_cached).length} of {models.length} models downloaded
+              {modeModels.filter(m => m.is_cached).length} of {modeModels.length} models downloaded
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* Category filter */}
-            <div className="flex items-center bg-white/5 rounded-lg p-1">
-              {(['all', 'fast', 'quality', 'specialized'] as CategoryFilter[]).map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => setCategoryFilter(cat)}
-                  className={cn(
-                    'px-3 py-1.5 text-sm rounded-md transition-colors capitalize',
-                    categoryFilter === cat
-                      ? 'bg-white/10 text-white'
-                      : 'text-white/50 hover:text-white/70'
-                  )}
-                >
-                  {cat}
-                </button>
-              ))}
-            </div>
+            {/* Category filter - only for images */}
+            {isImages && (
+              <div className="flex items-center bg-white/5 rounded-lg p-1">
+                {(['all', 'fast', 'quality', 'specialized'] as CategoryFilter[]).map(cat => (
+                  <button
+                    key={cat}
+                    onClick={() => setCategoryFilter(cat)}
+                    className={cn(
+                      'px-3 py-1.5 text-sm rounded-md transition-colors capitalize',
+                      categoryFilter === cat
+                        ? 'bg-white/10 text-white'
+                        : 'text-white/50 hover:text-white/70'
+                    )}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            )}
             {/* Status filter */}
             <div className="flex items-center bg-white/5 rounded-lg p-1">
               {(['all', 'downloaded', 'not-downloaded'] as StatusFilter[]).map(status => (
@@ -356,8 +451,8 @@ function CuratedView({
           <div className="flex-1 flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-white/40" />
           </div>
-        ) : categoryFilter === 'all' ? (
-          Object.entries(groupedModels).map(([category, categoryModels]) => (
+        ) : (isImages ? categoryFilter === 'all' : true) ? (
+          Object.entries(activeGroupedModels).map(([category, categoryModels]) => (
             categoryModels.length > 0 && (
               <div key={category}>
                 <div className="flex items-center gap-2 mb-4">
@@ -383,7 +478,7 @@ function CuratedView({
           ))
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {filteredModels.map(model => (
+            {modeFilteredModels.map(model => (
               <ModelCard
                 key={model.id}
                 model={model}
@@ -393,7 +488,7 @@ function CuratedView({
           </div>
         )}
 
-        {!isLoading && filteredModels.length === 0 && (
+        {!isLoading && modeFilteredModels.length === 0 && (
           <div className="text-center py-12">
             <p className="text-white/40">No models match your filters</p>
           </div>
@@ -464,36 +559,13 @@ function FavoritesView({ favorites, models, isLoading, currentModel, isFavorited
               </div>
             )}
 
-            {/* Civitai favorites (show as ID list since we don't have full model data) */}
+            {/* Civitai favorites — fetch full model data for rich cards */}
             {civitaiFavIds.length > 0 && (
-              <div>
-                <h2 className="text-lg font-medium text-white/80 mb-4">Civitai Models</h2>
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                  {civitaiFavIds.map((favId) => {
-                    const versionId = favId.replace('civitai:', '')
-                    return (
-                      <Link
-                        key={favId}
-                        to={`/models?view=civitai`}
-                        className="rounded-xl border border-white/10 bg-white/[0.02] p-4 hover:border-primary/30 transition-all"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm text-white/80">Civitai Version</p>
-                            <p className="text-xs text-white/40 font-mono mt-0.5">#{versionId}</p>
-                          </div>
-                          <button
-                            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggleFavorite(favId) }}
-                            className="p-1 rounded-md hover:bg-white/10 transition-colors"
-                          >
-                            <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
-                          </button>
-                        </div>
-                      </Link>
-                    )
-                  })}
-                </div>
-              </div>
+              <CivitaiFavoritesSection
+                civitaiFavIds={civitaiFavIds}
+                isFavorited={isFavorited}
+                onToggleFavorite={onToggleFavorite}
+              />
             )}
 
             {/* Remote favorites */}
@@ -526,6 +598,201 @@ function FavoritesView({ favorites, models, isLoading, currentModel, isFavorited
                     )
                   })}
                 </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </>
+  )
+}
+
+// =============================================================================
+// Civitai Favorites Section (rich cards via useQueries)
+// =============================================================================
+
+function CivitaiFavoritesSection({
+  civitaiFavIds,
+  isFavorited,
+  onToggleFavorite,
+}: {
+  civitaiFavIds: string[]
+  isFavorited: (id: string) => boolean
+  onToggleFavorite: (id: string) => void
+}) {
+  const navigate = useNavigate()
+
+  const modelQueries = useQueries({
+    queries: civitaiFavIds.map((favId) => {
+      const modelId = Number(favId.replace('civitai:', ''))
+      return {
+        queryKey: ['civitai-model', modelId],
+        queryFn: () => api.getCivitaiModel(modelId),
+        staleTime: 10 * 60 * 1000,
+        enabled: !isNaN(modelId),
+      }
+    }),
+  })
+
+  const loadedModels = modelQueries
+    .map((q, i) => ({ query: q, favId: civitaiFavIds[i]! }))
+    .filter((item) => item.query.isSuccess && item.query.data)
+
+  const loadingCount = modelQueries.filter((q) => q.isLoading).length
+
+  return (
+    <div>
+      <h2 className="text-lg font-medium text-white/80 mb-4">Civitai Models</h2>
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {loadedModels.map(({ query, favId }) => {
+          const model = query.data!
+          return (
+            <CivitaiModelCard
+              key={favId}
+              model={model}
+              isDownloaded={false}
+              onDownload={() => {}}
+              onClick={() => navigate(`/models/civitai/${model.id}`)}
+              isFavorited={isFavorited(favId)}
+              onToggleFavorite={() => onToggleFavorite(favId)}
+            />
+          )
+        })}
+        {loadingCount > 0 && Array.from({ length: loadingCount }).map((_, i) => (
+          <div key={`skel-${i}`} className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden animate-pulse">
+            <div className="aspect-[4/3] bg-white/5" />
+            <div className="p-3 space-y-2">
+              <div className="h-4 bg-white/5 rounded w-3/4" />
+              <div className="h-3 bg-white/5 rounded w-1/2" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// =============================================================================
+// Civitai Downloaded View
+// =============================================================================
+
+function CivitaiDownloadedView({ isFavorited, onToggleFavorite }: { isFavorited: (id: string) => boolean; onToggleFavorite: (id: string) => void }) {
+  const navigate = useNavigate()
+
+  const { data: downloads = [], isLoading } = useQuery({
+    queryKey: ['civitai-downloads'],
+    queryFn: api.getCivitaiDownloads,
+    refetchInterval: 5000,
+  })
+
+  const completedDownloads = downloads.filter(d => d.status === 'completed')
+
+  // Deduplicate by civitai_model_id (keep first completed entry per model)
+  const uniqueModelIds = [...new Set(completedDownloads.map(d => d.civitai_model_id))]
+
+  const modelQueries = useQueries({
+    queries: uniqueModelIds.map((modelId) => ({
+      queryKey: ['civitai-model', modelId],
+      queryFn: () => api.getCivitaiModel(modelId),
+      staleTime: 10 * 60 * 1000,
+    })),
+  })
+
+  const loadedModels = modelQueries
+    .map((q, i) => ({ query: q, modelId: uniqueModelIds[i] }))
+    .filter((item) => item.query.isSuccess && item.query.data)
+
+  const checkpoints = loadedModels.filter(item => item.query.data!.type === 'Checkpoint')
+  const loras = loadedModels.filter(item => item.query.data!.type === 'LORA')
+  const others = loadedModels.filter(item => item.query.data!.type !== 'Checkpoint' && item.query.data!.type !== 'LORA')
+
+  const loadingCount = modelQueries.filter(q => q.isLoading).length
+
+  const getUseHandler = (model: CivitaiModelSummary): (() => void) | undefined => {
+    if (model.type !== 'Checkpoint') return undefined
+    const download = completedDownloads.find(d => d.civitai_model_id === model.id)
+    if (!download) return undefined
+    const backendModelId = `civitai-${download.civitai_model_id}-v${download.version_id}`
+    const version = model.modelVersions.find(v => v.id === download.version_id) || model.modelVersions[0]
+    const isVideo = isVideoBaseModel(version?.baseModel)
+    return () => navigate(`${isVideo ? '/video' : '/image'}?model=${backendModelId}`)
+  }
+
+  const renderCards = (items: typeof loadedModels) =>
+    items.map(({ query, modelId }) => {
+      const model = query.data!
+      const favId = `civitai:${model.id}`
+      return (
+        <CivitaiModelCard
+          key={modelId}
+          model={model}
+          isDownloaded={true}
+          onDownload={() => {}}
+          onClick={() => navigate(`/models/civitai/${model.id}`)}
+          onUse={getUseHandler(model)}
+          isFavorited={isFavorited(favId)}
+          onToggleFavorite={() => onToggleFavorite(favId)}
+        />
+      )
+    })
+
+  return (
+    <>
+      <div className="flex-shrink-0 px-6 py-4 border-b border-white/5">
+        <h1 className="text-xl font-semibold text-white">Downloaded</h1>
+        <p className="text-sm text-white/50 mt-1">
+          {uniqueModelIds.length} CivitAI model{uniqueModelIds.length !== 1 ? 's' : ''} downloaded
+        </p>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-white/40" />
+          </div>
+        ) : uniqueModelIds.length === 0 ? (
+          <div className="text-center py-12">
+            <Download className="h-12 w-12 text-white/20 mx-auto mb-3" />
+            <p className="text-white/40">No downloaded CivitAI models yet</p>
+            <p className="text-sm text-white/30 mt-1">Browse CivitAI and download models to see them here</p>
+          </div>
+        ) : (
+          <>
+            {checkpoints.length > 0 && (
+              <div>
+                <h2 className="text-lg font-medium text-white/80 mb-4">Checkpoints</h2>
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {renderCards(checkpoints)}
+                </div>
+              </div>
+            )}
+            {loras.length > 0 && (
+              <div>
+                <h2 className="text-lg font-medium text-white/80 mb-4">LoRAs</h2>
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {renderCards(loras)}
+                </div>
+              </div>
+            )}
+            {others.length > 0 && (
+              <div>
+                <h2 className="text-lg font-medium text-white/80 mb-4">Other</h2>
+                <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  {renderCards(others)}
+                </div>
+              </div>
+            )}
+            {loadingCount > 0 && (
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {Array.from({ length: loadingCount }).map((_, i) => (
+                  <div key={`skel-${i}`} className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden animate-pulse">
+                    <div className="aspect-[4/3] bg-white/5" />
+                    <div className="p-3 space-y-2">
+                      <div className="h-4 bg-white/5 rounded w-3/4" />
+                      <div className="h-3 bg-white/5 rounded w-1/2" />
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </>
@@ -693,8 +960,8 @@ function CivitaiView({ isFavorited, onToggleFavorite }: { isFavorited: (id: stri
   const navigate = useNavigate()
   const [, setSearchParamsRaw] = useSearchParams()
 
-  const [searchQuery, setSearchQuery] = useState('')
-  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useUrlState('q', '')
+  const [debouncedQuery, setDebouncedQuery] = useState(searchQuery)
   const [typeFilter, setTypeFilter] = useUrlState('civitaiType', '') as [CivitaiModelType, (v: string, opts?: { replace?: boolean }) => void]
   const [sortBy, setSortBy] = useUrlState('sort', 'Highest Rated') as [CivitaiSortOption, (v: string, opts?: { replace?: boolean }) => void]
   const [baseModelFilter, setBaseModelFilter] = useUrlState('base', '')
@@ -706,11 +973,11 @@ function CivitaiView({ isFavorited, onToggleFavorite }: { isFavorited: (id: stri
 
   const [debounceTimer, setDebounceTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
   const handleSearchChange = useCallback((value: string) => {
-    setSearchQuery(value)
+    setSearchQuery(value, { replace: true })
     if (debounceTimer) clearTimeout(debounceTimer)
     const timer = setTimeout(() => setDebouncedQuery(value), 400)
     setDebounceTimer(timer)
-  }, [debounceTimer])
+  }, [debounceTimer, setSearchQuery])
 
   const tagFilter = contentCategory === 'video' ? 'video' : undefined
 
@@ -991,17 +1258,30 @@ function CivitaiView({ isFavorited, onToggleFavorite }: { isFavorited: (id: stri
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {allModels.map((model) => {
                 const firstVersion = model.modelVersions[0]
-                const favId = firstVersion ? `civitai:${firstVersion.id}` : undefined
+                const favId = `civitai:${model.id}`
+                const downloaded = firstVersion ? isVersionDownloaded(firstVersion.id) : false
+                // Only provide onUse for downloaded Checkpoints (not LoRAs)
+                let useHandler: (() => void) | undefined
+                if (downloaded && model.type === 'Checkpoint' && firstVersion) {
+                  const download = downloads.find(d => d.civitai_model_id === model.id && d.status === 'completed')
+                  if (download) {
+                    const backendModelId = `civitai-${download.civitai_model_id}-v${download.version_id}`
+                    const version = model.modelVersions.find(v => v.id === download.version_id) || firstVersion
+                    const isVideo = isVideoBaseModel(version?.baseModel)
+                    useHandler = () => navigate(`${isVideo ? '/video' : '/image'}?model=${backendModelId}`)
+                  }
+                }
                 return (
                 <CivitaiModelCard
                   key={model.id}
                   model={model}
                   downloadJob={getDownloadJob(firstVersion?.id)}
-                  isDownloaded={firstVersion ? isVersionDownloaded(firstVersion.id) : false}
+                  isDownloaded={downloaded}
                   onDownload={() => handleDownload(model)}
                   onClick={() => navigate(`/models/civitai/${model.id}`)}
-                  isFavorited={favId ? isFavorited(favId) : false}
-                  onToggleFavorite={favId ? () => onToggleFavorite(favId) : undefined}
+                  onUse={useHandler}
+                  isFavorited={isFavorited(favId)}
+                  onToggleFavorite={() => onToggleFavorite(favId)}
                 />
                 )
               })}
@@ -1026,6 +1306,7 @@ function CivitaiModelCard({
   isDownloaded,
   onDownload,
   onClick,
+  onUse,
   isFavorited,
   onToggleFavorite,
 }: {
@@ -1034,6 +1315,7 @@ function CivitaiModelCard({
   isDownloaded: boolean
   onDownload: () => void
   onClick: () => void
+  onUse?: () => void
   isFavorited?: boolean
   onToggleFavorite?: () => void
 }) {
@@ -1118,7 +1400,14 @@ function CivitaiModelCard({
         )}
         {/* Download button */}
         <div className="mt-3">
-          {isDownloaded ? (
+          {isDownloaded && onUse ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onUse() }}
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-green-500/20 text-green-400 border border-green-500/20 hover:bg-green-500/30 transition-colors"
+            >
+              <Zap className="h-3.5 w-3.5" /> Use
+            </button>
+          ) : isDownloaded ? (
             <button disabled className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-green-500/10 text-green-400 border border-green-500/20">
               <Check className="h-3.5 w-3.5" /> Downloaded
             </button>

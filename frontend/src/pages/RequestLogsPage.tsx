@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams, Link } from 'react-router-dom'
 import { useUrlState, useUrlStateNumber } from '@/hooks/useUrlState'
 import {
   ScrollText, Loader2, Trash2, CheckCircle, AlertCircle, Clock,
-  Image as ImageIcon, Video, Wand2, Copy, ChevronLeft, ChevronRight,
+  Image as ImageIcon, Video, Wand2, Copy, ChevronLeft, ChevronRight, Download,
+  ExternalLink,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, type RequestLog } from '@/api/client'
@@ -11,6 +13,7 @@ import { api, type RequestLog } from '@/api/client'
 const STATUS_ICON: Record<string, typeof Clock> = {
   pending: Clock,
   generating: Loader2,
+  downloading: Loader2,
   completed: CheckCircle,
   failed: AlertCircle,
 }
@@ -18,6 +21,7 @@ const STATUS_ICON: Record<string, typeof Clock> = {
 const STATUS_COLOR: Record<string, string> = {
   pending: 'text-yellow-500',
   generating: 'text-blue-500',
+  downloading: 'text-blue-500',
   completed: 'text-green-500',
   failed: 'text-red-500',
 }
@@ -26,6 +30,7 @@ const TYPE_ICON: Record<string, typeof ImageIcon> = {
   image: ImageIcon,
   video: Video,
   i2v: Wand2,
+  download: Download,
 }
 
 function formatDuration(ms: number | null) {
@@ -38,12 +43,56 @@ function formatDate(timestamp: string) {
   return new Date(timestamp).toLocaleString()
 }
 
+function getModelLink(log: RequestLog): string | null {
+  const params = log.parameters as Record<string, unknown>
+
+  if (log.type === 'download') {
+    // CivitAI download
+    const civitaiId = params?.civitai_model_id
+    if (civitaiId) return `/models/civitai/${civitaiId}`
+    // HuggingFace download
+    const modelId = params?.model_id
+    if (modelId) return `/model/${modelId}`
+    return null
+  }
+
+  // Image / video / i2v generation logs — model field is the model ID
+  if (log.model.startsWith('civitai-')) {
+    // Format: civitai-<modelId>-v<versionId>
+    const match = log.model.match(/^civitai-(\d+)-v\d+$/)
+    if (match) return `/models/civitai/${match[1]}`
+  }
+
+  // Local model
+  return `/model/${log.model}`
+}
+
 export default function RequestLogsPage() {
   const queryClient = useQueryClient()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [selectedLog, setSelectedLog] = useState<RequestLog | null>(null)
   const [page, setPage] = useUrlStateNumber('page', 1)
   const [typeFilter, setTypeFilter] = useUrlState('type', 'all')
   const [statusFilter, setStatusFilter] = useUrlState('status', 'all')
+
+  // Deep-link: ?selected=<logId> auto-selects a specific log
+  const selectedParam = searchParams.get('selected')
+
+  const { data: deepLinkedLog } = useQuery({
+    queryKey: ['request-log', selectedParam],
+    queryFn: () => api.getRequestLog(selectedParam!),
+    enabled: !!selectedParam,
+  })
+
+  useEffect(() => {
+    if (deepLinkedLog && selectedParam) {
+      setSelectedLog(deepLinkedLog)
+      // Clear the selected param so it doesn't re-trigger on refetch
+      const next = new URLSearchParams(searchParams)
+      next.delete('selected')
+      setSearchParams(next, { replace: true })
+    }
+  }, [deepLinkedLog, selectedParam, searchParams, setSearchParams])
 
   const apiTypeFilter = typeFilter === 'all' ? undefined : typeFilter
   const apiStatusFilter = statusFilter === 'all' ? undefined : statusFilter
@@ -101,7 +150,7 @@ export default function RequestLogsPage() {
       {/* Filters */}
       <div className="flex items-center gap-4 px-6 py-3 border-b border-border flex-shrink-0">
         <div className="flex gap-1.5">
-          {['all', 'image', 'video', 'i2v'].map((type) => (
+          {['all', 'image', 'video', 'i2v', 'download'].map((type) => (
             <button
               key={type}
               onClick={() => { setTypeFilter(type); setPage(1) }}
@@ -112,13 +161,13 @@ export default function RequestLogsPage() {
                   : 'bg-muted text-muted-foreground hover:bg-accent'
               )}
             >
-              {type === 'all' ? 'All' : type === 'i2v' ? 'I2V' : type.charAt(0).toUpperCase() + type.slice(1)}
+              {type === 'all' ? 'All' : type === 'i2v' ? 'I2V' : type === 'download' ? 'Download' : type.charAt(0).toUpperCase() + type.slice(1)}
             </button>
           ))}
         </div>
         <div className="w-px h-5 bg-border" />
         <div className="flex gap-1.5">
-          {['all', 'completed', 'failed', 'generating', 'pending'].map((status) => (
+          {['all', 'completed', 'failed', 'generating', 'downloading', 'pending'].map((status) => (
             <button
               key={status}
               onClick={() => { setStatusFilter(status); setPage(1) }}
@@ -168,7 +217,7 @@ export default function RequestLogsPage() {
                       <div className="flex items-center gap-2.5 mb-1.5">
                         <TypeIcon className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                         <span className="font-medium text-sm truncate flex-1">{log.model}</span>
-                        <StatusIcon className={cn('h-4 w-4 flex-shrink-0', statusColor, log.status === 'generating' && 'animate-spin')} />
+                        <StatusIcon className={cn('h-4 w-4 flex-shrink-0', statusColor, (log.status === 'generating' || log.status === 'downloading') && 'animate-spin')} />
                       </div>
                       <p className="text-xs text-muted-foreground line-clamp-1 mb-1.5">{log.prompt}</p>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground/70">
@@ -225,9 +274,18 @@ export default function RequestLogsPage() {
                     return (
                       <>
                         <TypeIcon className="h-5 w-5 text-muted-foreground" />
-                        <span className="font-semibold">{selectedLog.model}</span>
+                        {(() => {
+                          const link = getModelLink(selectedLog)
+                          return link ? (
+                            <Link to={link} className="font-semibold hover:text-primary transition-colors">
+                              {selectedLog.model}
+                            </Link>
+                          ) : (
+                            <span className="font-semibold">{selectedLog.model}</span>
+                          )
+                        })()}
                         <span className={cn('flex items-center gap-1 text-sm', statusColor)}>
-                          <StatusIcon className={cn('h-4 w-4', selectedLog.status === 'generating' && 'animate-spin')} />
+                          <StatusIcon className={cn('h-4 w-4', (selectedLog.status === 'generating' || selectedLog.status === 'downloading') && 'animate-spin')} />
                           {selectedLog.status}
                         </span>
                       </>
@@ -264,7 +322,17 @@ export default function RequestLogsPage() {
                     </div>
                     <div>
                       <label className="text-xs text-muted-foreground">Model</label>
-                      <p className="text-sm mt-0.5">{selectedLog.model}</p>
+                      {(() => {
+                        const link = getModelLink(selectedLog)
+                        return link ? (
+                          <Link to={link} className="text-sm mt-0.5 text-primary hover:underline flex items-center gap-1 w-fit">
+                            {selectedLog.model}
+                            <ExternalLink className="h-3 w-3" />
+                          </Link>
+                        ) : (
+                          <p className="text-sm mt-0.5">{selectedLog.model}</p>
+                        )
+                      })()}
                     </div>
                     <div>
                       <label className="text-xs text-muted-foreground">Timestamp</label>

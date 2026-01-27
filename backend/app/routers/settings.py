@@ -14,12 +14,12 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 class RequestLog(BaseModel):
     id: str
     timestamp: str
-    type: Literal["image", "video", "i2v"]
+    type: Literal["image", "video", "i2v", "download"]
     prompt: str
     negative_prompt: Optional[str] = None
     model: str
     parameters: dict  # width, height, steps, guidance, seed, etc.
-    status: Literal["pending", "generating", "completed", "failed"]
+    status: Literal["pending", "generating", "downloading", "completed", "failed"]
     duration_ms: Optional[int] = None
     error: Optional[str] = None
     result_id: Optional[str] = None  # Asset ID if completed
@@ -39,6 +39,7 @@ class AppSettings(BaseModel):
     auto_save_history: bool = True
     max_log_entries: int = 1000
     favorite_models: List[str] = []
+    civitai_api_key: Optional[str] = None
 
 
 class SystemInfo(BaseModel):
@@ -157,6 +158,12 @@ async def get_settings():
 async def update_settings(settings: AppSettings):
     """Update application settings."""
     save_settings(settings)
+    # Refresh CivitAI client auth if API key changed
+    try:
+        from ..services.civitai_client import get_civitai_client
+        get_civitai_client().refresh_auth()
+    except Exception:
+        pass
     return settings
 
 

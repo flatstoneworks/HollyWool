@@ -1,17 +1,19 @@
+import { useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Settings, Info, Cpu, Palette, AlertTriangle,
-  Loader2, CheckCircle, Sun, Moon, Monitor, Wand2
+  Loader2, CheckCircle, Sun, Moon, Monitor, Wand2, Key, Eye, EyeOff, ExternalLink
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { api, ThemeOption } from '@/api/client'
 import { useTheme } from '@/contexts/ThemeContext'
 
-type SettingsSection = 'appearance' | 'system' | 'about'
+type SettingsSection = 'appearance' | 'api-keys' | 'system' | 'about'
 
 const sections: { id: SettingsSection; label: string; icon: typeof Settings }[] = [
   { id: 'appearance', label: 'Appearance', icon: Palette },
+  { id: 'api-keys', label: 'API Keys', icon: Key },
   { id: 'system', label: 'System', icon: Cpu },
   { id: 'about', label: 'About', icon: Info },
 ]
@@ -55,6 +57,7 @@ export default function SettingsPage() {
       <div className="flex-1 overflow-auto">
         <div className="max-w-4xl mx-auto p-6">
           {currentSection === 'appearance' && <AppearanceSection />}
+          {currentSection === 'api-keys' && <ApiKeysSection />}
           {currentSection === 'system' && <SystemSection />}
           {currentSection === 'about' && <AboutSection />}
         </div>
@@ -165,6 +168,115 @@ function AppearanceSection() {
                 className="w-32 px-3 py-2 bg-background border border-border rounded-md text-sm"
               />
             </label>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ============== API Keys Section ==============
+function ApiKeysSection() {
+  const queryClient = useQueryClient()
+  const [showKey, setShowKey] = useState(false)
+  const [keyValue, setKeyValue] = useState<string | null>(null)
+  const [hasEdited, setHasEdited] = useState(false)
+
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.getSettings,
+  })
+
+  const updateSettings = useMutation({
+    mutationFn: api.updateSettings,
+    meta: { successMessage: 'API key saved', errorMessage: 'Failed to save' },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['settings'] })
+      setHasEdited(false)
+    },
+  })
+
+  // Initialize keyValue from settings on first load
+  const displayValue = hasEdited ? (keyValue ?? '') : (settings?.civitai_api_key ?? '')
+
+  const handleSave = () => {
+    if (!settings) return
+    const trimmed = (keyValue ?? '').trim() || null
+    updateSettings.mutate({ ...settings, civitai_api_key: trimmed })
+  }
+
+  const hasKey = Boolean(settings?.civitai_api_key)
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-xl font-semibold">API Keys</h2>
+        <p className="text-sm text-muted-foreground mt-1">Configure API keys for external services</p>
+      </div>
+
+      {/* CivitAI API Key */}
+      <div className="bg-card rounded-lg border border-border p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <h3 className="font-medium">CivitAI API Key</h3>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Required for downloading gated or early-access models from CivitAI
+            </p>
+          </div>
+          {hasKey ? (
+            <span className="flex items-center gap-1.5 text-xs text-green-400">
+              <CheckCircle className="h-3.5 w-3.5" /> Configured
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 text-xs text-amber-400">
+              <AlertTriangle className="h-3.5 w-3.5" /> Not set
+            </span>
+          )}
+        </div>
+
+        <div className="space-y-3">
+          <div className="relative">
+            <input
+              type={showKey ? 'text' : 'password'}
+              value={displayValue}
+              onChange={(e) => { setKeyValue(e.target.value); setHasEdited(true) }}
+              placeholder="Enter your CivitAI API key..."
+              className="w-full px-3 py-2 pr-10 bg-background border border-border rounded-md text-sm font-mono"
+            />
+            <button
+              onClick={() => setShowKey(!showKey)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <a
+              href="https://civitai.com/user/account"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-primary hover:underline flex items-center gap-1"
+            >
+              Get your API key from CivitAI
+              <ExternalLink className="h-3 w-3" />
+            </a>
+            <button
+              onClick={handleSave}
+              disabled={!hasEdited || updateSettings.isPending}
+              className={cn(
+                'px-4 py-1.5 text-sm rounded-lg transition-colors',
+                hasEdited
+                  ? 'bg-primary text-primary-foreground hover:bg-primary/90'
+                  : 'bg-muted text-muted-foreground cursor-not-allowed'
+              )}
+            >
+              {updateSettings.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                'Save'
+              )}
+            </button>
           </div>
         </div>
       </div>

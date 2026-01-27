@@ -45,7 +45,8 @@ export function ImagePage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [prompt, setPrompt] = useState('')
-  const [selectedModel, setSelectedModel] = useState<string>('sd-turbo')
+  const initialModel = searchParams.get('model') || 'sd-turbo'
+  const [selectedModel, setSelectedModel] = useState<string>(initialModel)
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('1:1')
   const [selectedStyle, setSelectedStyle] = useState('none')
   const [imageCount, setImageCount] = useState(4)

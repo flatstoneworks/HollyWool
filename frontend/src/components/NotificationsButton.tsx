@@ -3,14 +3,14 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Bell, ImageIcon, Film, Loader2, X, ChevronRight,
-  CheckCircle2, XCircle, Clock
+  CheckCircle2, XCircle, Clock, Download
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { api, Job, VideoJob } from '@/api/client'
+import { api, Job, VideoJob, CivitaiDownloadJob, HFDownloadJob } from '@/api/client'
 
 interface Activity {
   id: string
-  type: 'image' | 'video'
+  type: 'image' | 'video' | 'download'
   sessionId: string | null
   prompt: string
   status: string
@@ -19,6 +19,9 @@ interface Activity {
   completedAt?: number | null
   createdAt?: number
   error?: string | null
+  filename?: string
+  civitaiModelId?: number
+  hfModelId?: string
 }
 
 function jobToActivity(job: Job | VideoJob, type: 'image' | 'video'): Activity {
@@ -33,6 +36,46 @@ function jobToActivity(job: Job | VideoJob, type: 'image' | 'video'): Activity {
     completedAt: job.completed_at ? new Date(job.completed_at).getTime() / 1000 : null,
     createdAt: job.created_at ? new Date(job.created_at).getTime() / 1000 : undefined,
     error: job.error,
+  }
+}
+
+function downloadToActivity(job: CivitaiDownloadJob): Activity {
+  const statusMap: Record<string, string> = {
+    queued: 'queued',
+    downloading: 'downloading',
+    completed: 'completed',
+    failed: 'failed',
+    cancelled: 'failed',
+  }
+  return {
+    id: job.id,
+    type: 'download',
+    sessionId: null,
+    prompt: job.model_name,
+    status: statusMap[job.status] || job.status,
+    progress: job.progress,
+    model: job.type,
+    completedAt: job.completed_at ? new Date(job.completed_at).getTime() / 1000 : null,
+    createdAt: job.created_at ? new Date(job.created_at).getTime() / 1000 : undefined,
+    error: job.error,
+    filename: job.filename,
+    civitaiModelId: job.civitai_model_id,
+  }
+}
+
+function hfDownloadToActivity(job: HFDownloadJob): Activity {
+  return {
+    id: job.id,
+    type: 'download',
+    sessionId: null,
+    prompt: job.model_name,
+    status: job.status,
+    progress: job.progress,
+    model: job.model_path,
+    completedAt: job.completed_at ? new Date(job.completed_at).getTime() / 1000 : null,
+    createdAt: job.created_at ? new Date(job.created_at).getTime() / 1000 : undefined,
+    error: job.error,
+    hfModelId: job.model_id,
   }
 }
 
@@ -67,6 +110,22 @@ export function NotificationsButton() {
     staleTime: 0,
   })
 
+  // Poll for civitai downloads
+  const { data: downloadJobsData } = useQuery({
+    queryKey: ['notifications-civitai-downloads'],
+    queryFn: () => api.getCivitaiDownloads(),
+    refetchInterval: 2000,
+    staleTime: 0,
+  })
+
+  // Poll for HuggingFace model downloads
+  const { data: hfDownloadJobsData } = useQuery({
+    queryKey: ['notifications-hf-downloads'],
+    queryFn: () => api.getHFDownloads(),
+    refetchInterval: 2000,
+    staleTime: 0,
+  })
+
   // Derive active and done activities from query data
   const { activeActivities, doneActivities } = useMemo(() => {
     const active: Activity[] = []
@@ -96,14 +155,46 @@ export function NotificationsButton() {
       }
     }
 
+    // Process civitai download jobs
+    if (downloadJobsData) {
+      for (const job of downloadJobsData) {
+        const activity = downloadToActivity(job)
+        if (['completed', 'failed', 'cancelled'].includes(job.status)) {
+          done.push(activity)
+        } else {
+          active.push(activity)
+        }
+      }
+    }
+
+    // Process HuggingFace model download jobs
+    if (hfDownloadJobsData) {
+      for (const job of hfDownloadJobsData) {
+        const activity = hfDownloadToActivity(job)
+        if (['completed', 'failed'].includes(job.status)) {
+          done.push(activity)
+        } else {
+          active.push(activity)
+        }
+      }
+    }
+
     // Sort done by completion time (most recent first)
     done.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))
 
     return { activeActivities: active, doneActivities: done.slice(0, 5) }
-  }, [imageJobsData, videoJobsData])
+  }, [imageJobsData, videoJobsData, downloadJobsData, hfDownloadJobsData])
 
   const handleNavigateToJob = (activity: Activity) => {
-    navigate(`/job/${activity.id}`)
+    if (activity.status === 'failed') {
+      navigate(`/logs?selected=${activity.id}`)
+    } else if (activity.type === 'download' && activity.civitaiModelId) {
+      navigate(`/models/civitai/${activity.civitaiModelId}`)
+    } else if (activity.type === 'download' && activity.hfModelId) {
+      navigate(`/model/${activity.hfModelId}`)
+    } else if (activity.type !== 'download') {
+      navigate(`/job/${activity.id}`)
+    }
     setIsOpen(false)
   }
 
@@ -174,9 +265,12 @@ export function NotificationsButton() {
                             <div className="flex items-start gap-3">
                               <div className={cn(
                                 'p-1.5 rounded-lg flex-shrink-0',
+                                activity.type === 'download' ? 'bg-green-500/20' :
                                 activity.type === 'image' ? 'bg-blue-500/20' : 'bg-purple-500/20'
                               )}>
-                                {activity.type === 'image' ? (
+                                {activity.type === 'download' ? (
+                                  <Download className="h-4 w-4 text-green-500" />
+                                ) : activity.type === 'image' ? (
                                   <ImageIcon className="h-4 w-4 text-blue-500" />
                                 ) : (
                                   <Film className="h-4 w-4 text-purple-500" />
@@ -240,7 +334,9 @@ export function NotificationsButton() {
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm text-foreground/80 truncate">{activity.prompt}</p>
                                 <div className="flex items-center gap-2 mt-1">
-                                  {activity.type === 'image' ? (
+                                  {activity.type === 'download' ? (
+                                    <Download className="h-3 w-3 text-muted-foreground" />
+                                  ) : activity.type === 'image' ? (
                                     <ImageIcon className="h-3 w-3 text-muted-foreground" />
                                   ) : (
                                     <Film className="h-3 w-3 text-muted-foreground" />

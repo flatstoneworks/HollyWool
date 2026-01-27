@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Loader2, Download, Check, X, ChevronLeft, ChevronRight,
-  Star, ArrowDownToLine, Heart, FileText, User,
+  Star, ArrowDownToLine, Heart, FileText, User, Shield, ExternalLink, Key,
 } from 'lucide-react'
 import {
   api,
@@ -86,6 +86,19 @@ export function CivitaiModelDetailPage() {
     staleTime: 30_000,
     gcTime: 5 * 60 * 1000,
   })
+
+  const { data: settings } = useQuery({
+    queryKey: ['settings'],
+    queryFn: api.getSettings,
+  })
+
+  const hasCivitaiKey = Boolean(settings?.civitai_api_key)
+
+  // Check if any download for this model failed with 401/Unauthorized
+  const has401Failure = downloads.some(
+    d => d.civitai_model_id === numericId && d.status === 'failed' &&
+         d.error && (d.error.includes('401') || d.error.toLowerCase().includes('unauthorized'))
+  )
 
   const downloadMutation = useMutation({
     mutationFn: api.startCivitaiDownload,
@@ -286,6 +299,53 @@ export function CivitaiModelDetailPage() {
             </>
           )}
         </div>
+
+        {/* 401 / No API key warning */}
+        {has401Failure && !hasCivitaiKey && (
+          <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3 flex items-start gap-2.5">
+            <Shield className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="text-sm flex-1">
+              <p className="text-amber-200">
+                This model requires a CivitAI API key to download.
+              </p>
+              <div className="flex items-center gap-3 mt-1.5">
+                <Link
+                  to="/settings?section=api-keys"
+                  className="text-amber-400 hover:underline flex items-center gap-1"
+                >
+                  <Key className="h-3 w-3" />
+                  Add API Key in Settings
+                </Link>
+                <a
+                  href="https://civitai.com/user/account"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-amber-400/70 hover:underline flex items-center gap-1"
+                >
+                  Get key from CivitAI
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+        {has401Failure && hasCivitaiKey && (
+          <div className="rounded-lg bg-amber-500/10 border border-amber-500/20 p-3 flex items-start gap-2.5">
+            <Shield className="h-4 w-4 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="text-sm">
+              <p className="text-amber-200">
+                Download failed with authentication error. Your API key may be invalid or this model requires additional access.
+              </p>
+              <Link
+                to="/settings?section=api-keys"
+                className="text-amber-400 hover:underline flex items-center gap-1 mt-1.5"
+              >
+                <Key className="h-3 w-3" />
+                Check API Key in Settings
+              </Link>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Two-column layout */}

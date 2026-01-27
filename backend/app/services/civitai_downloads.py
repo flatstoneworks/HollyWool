@@ -14,6 +14,7 @@ from ..models.civitai_schemas import (
     CivitaiDownloadRequest,
     CivitaiDownloadStatus,
 )
+from ..routers.settings import add_log, update_log, RequestLog
 
 
 class CivitaiDownloadManager:
@@ -179,11 +180,29 @@ class CivitaiDownloadManager:
         if not job:
             return
 
+        started_at = datetime.utcnow()
         self._update_job(
             job_id,
             status=CivitaiDownloadStatus.DOWNLOADING,
-            started_at=datetime.utcnow(),
+            started_at=started_at,
         )
+
+        # Log download start to request logs
+        add_log(RequestLog(
+            id=job_id,
+            timestamp=started_at.isoformat(),
+            type="download",
+            prompt=job.model_name,
+            model=job.filename,
+            parameters={
+                "version_id": job.version_id,
+                "civitai_model_id": job.civitai_model_id,
+                "base_model": job.base_model,
+                "file_size_kb": job.file_size_kb,
+                "type": job.type,
+            },
+            status="downloading",
+        ))
 
         # Determine output directory
         if job.type.upper() == "LORA":
@@ -194,8 +213,15 @@ class CivitaiDownloadManager:
         output_path = output_dir / job.filename
 
         try:
+            # Get CivitAI API key from settings for authenticated downloads
+            from ..routers.settings import load_settings
+            settings = load_settings()
+            headers = {}
+            if settings.civitai_api_key:
+                headers["Authorization"] = f"Bearer {settings.civitai_api_key}"
+
             # Stream download with progress
-            with httpx.Client(timeout=None, follow_redirects=True) as client:
+            with httpx.Client(timeout=None, follow_redirects=True, headers=headers) as client:
                 with client.stream("GET", job.download_url) as response:
                     response.raise_for_status()
                     total = int(response.headers.get("content-length", 0))
@@ -241,14 +267,21 @@ class CivitaiDownloadManager:
                                 )
 
             # Download complete
+            completed_at = datetime.utcnow()
             self._update_job(
                 job_id,
                 status=CivitaiDownloadStatus.COMPLETED,
                 progress=100.0,
                 downloaded_bytes=downloaded,
                 local_path=str(output_path),
-                completed_at=datetime.utcnow(),
+                completed_at=completed_at,
             )
+
+            # Log completion to request logs
+            update_log(job_id, {
+                "status": "completed",
+                "duration_ms": int((completed_at - started_at).total_seconds() * 1000),
+            })
 
             # Write metadata JSON alongside the file
             metadata_path = output_path.with_suffix(".json")
@@ -281,6 +314,9 @@ class CivitaiDownloadManager:
                 error=str(e),
                 completed_at=datetime.utcnow(),
             )
+
+            # Log failure to request logs
+            update_log(job_id, {"status": "failed", "error": str(e)})
 
     def _register_model(self, job: CivitaiDownloadJob, local_path: str) -> None:
         registry_file = self._get_models_registry_file()
