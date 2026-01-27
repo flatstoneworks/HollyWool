@@ -1,11 +1,11 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
   Loader2, Download, Check, ExternalLink, Zap, Sparkles, Star,
   Shield, AlertCircle, Trash2, HardDrive, Clock, ChevronRight,
-  Image, Video, Lock, Search, X, ChevronDown, ArrowDownToLine, User,
-  Globe,
+  Image, Video, Lock, Search, X, ArrowDownToLine, User,
+  Globe, Settings, ChevronLeft, Heart, FileText,
 } from 'lucide-react'
 import {
   api,
@@ -14,7 +14,15 @@ import {
   type CivitaiModelSummary,
   type CivitaiDownloadRequest,
   type CivitaiDownloadJob,
+  type CivitaiModelVersion,
 } from '@/api/client'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import {
   PROVIDER_PRESETS,
@@ -76,10 +84,10 @@ export function ModelsPage() {
 
   const models = modelsData?.models || []
   const totalCacheSize = modelsData?.total_cache_size_gb || 0
-  const providers = providersData?.providers || {}
+  const providersList = providersData?.providers || []
 
   const isProviderConfigured = (providerId: string): boolean => {
-    return providers[providerId]?.is_configured ?? false
+    return providersList.find(p => p.provider === providerId)?.is_configured ?? false
   }
 
   // Filter models (curated view only)
@@ -446,19 +454,27 @@ function ProviderView({ providerId, isConfigured }: ProviderViewProps) {
         </div>
       </div>
 
-      {/* Config banner if not configured */}
-      {!isConfigured && (
-        <div className="mx-6 mt-4 flex items-start gap-3 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
-          <AlertCircle className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm text-amber-200 font-medium">API key required</p>
-            <p className="text-sm text-amber-200/70 mt-1">
-              Set <code className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono text-xs">{preset.envVar}</code> to use {preset.name} models.
-              Configure in Settings.
-            </p>
-          </div>
+      {/* Config banner */}
+      <div className="mx-6 mt-4 flex items-start gap-3 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+        <AlertCircle className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="flex-1">
+          <p className="text-sm text-amber-200 font-medium">
+            {isConfigured ? 'Provider configured' : 'API key required'}
+          </p>
+          <p className="text-sm text-amber-200/70 mt-1">
+            {isConfigured
+              ? `${preset.name} is ready to use.`
+              : `Configure your API key to use ${preset.name} models.`}
+          </p>
         </div>
-      )}
+        <Link
+          to={`/provider/${providerId}`}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-white/10 text-white/80 hover:bg-white/20 hover:text-white transition-colors flex-shrink-0"
+        >
+          <Settings className="h-3.5 w-3.5" />
+          Configure
+        </Link>
+      </div>
 
       {/* Preview model cards */}
       <div className="flex-1 overflow-y-auto p-6">
@@ -530,6 +546,10 @@ function CivitaiView() {
   const [sortBy, setSortBy] = useState<CivitaiSortOption>('Highest Rated')
   const [baseModelFilter, setBaseModelFilter] = useState('')
   const [nsfwEnabled, setNsfwEnabled] = useState(false)
+  const [selectedModel, setSelectedModel] = useState<CivitaiModelSummary | null>(null)
+
+  // Infinite scroll sentinel ref
+  const loadMoreRef = useRef<HTMLDivElement>(null)
 
   const [debounceTimer, setDebounceTimer] = useState<ReturnType<typeof setTimeout> | null>(null)
   const handleSearchChange = useCallback((value: string) => {
@@ -561,18 +581,23 @@ function CivitaiView() {
     },
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (lastPage) => lastPage.metadata?.nextCursor,
+    staleTime: 5 * 60 * 1000, // 5 min — matches backend cache TTL
+    gcTime: 15 * 60 * 1000,   // 15 min — keep in memory longer for back/forward nav
   })
 
   const { data: downloads = [] } = useQuery({
     queryKey: ['civitai-downloads'],
     queryFn: api.getCivitaiDownloads,
     refetchInterval: 2000,
+    staleTime: 0, // Always refetch — active polling for real-time progress
   })
 
   const { data: downloadedVersions = [] } = useQuery({
     queryKey: ['civitai-downloaded-versions'],
     queryFn: api.getCivitaiDownloadedVersions,
     refetchInterval: 5000,
+    staleTime: 30_000, // 30s — changes infrequently outside of active downloads
+    gcTime: 5 * 60 * 1000,
   })
 
   const downloadMutation = useMutation({
@@ -590,17 +615,51 @@ function CivitaiView() {
     },
   })
 
+  // Infinite scroll: auto-fetch next page when sentinel enters viewport
+  useEffect(() => {
+    const sentinel = loadMoreRef.current
+    if (!sentinel) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+          fetchNextPage()
+        }
+      },
+      { rootMargin: '200px' }
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
+
   const allModels = data?.pages.flatMap((p) => p.items) ?? []
 
-  const getDownloadJob = (versionId: number): CivitaiDownloadJob | undefined =>
-    downloads.find((d) => d.version_id === versionId && ['queued', 'downloading'].includes(d.status))
+  const getDownloadJob = (versionId: number | undefined): CivitaiDownloadJob | undefined =>
+    versionId != null
+      ? downloads.find((d) => d.version_id === versionId && ['queued', 'downloading'].includes(d.status))
+      : undefined
 
-  const isVersionDownloaded = (versionId: number): boolean =>
-    downloadedVersions.includes(versionId)
+  const isVersionDownloaded = (versionId: number | undefined): boolean =>
+    versionId != null ? downloadedVersions.includes(versionId) : false
 
   const handleDownload = (model: CivitaiModelSummary) => {
     const version = model.modelVersions[0]
     if (!version) return
+    const file = version.files[0]
+    if (!file) return
+    const request: CivitaiDownloadRequest = {
+      civitai_model_id: model.id,
+      version_id: version.id,
+      model_name: model.name,
+      type: model.type || 'Checkpoint',
+      filename: file.name || `${model.name}.safetensors`,
+      download_url: version.downloadUrl || '',
+      base_model: version.baseModel,
+      file_size_kb: file.sizeKB,
+    }
+    downloadMutation.mutate(request)
+  }
+
+  const handleDownloadVersion = (model: CivitaiModelSummary, version: CivitaiModelVersion) => {
     const file = version.files[0]
     if (!file) return
     const request: CivitaiDownloadRequest = {
@@ -752,27 +811,29 @@ function CivitaiView() {
                       : false
                   }
                   onDownload={() => handleDownload(model)}
+                  onClick={() => setSelectedModel(model)}
                 />
               ))}
             </div>
-            {hasNextPage && (
-              <div className="flex justify-center mt-6 pb-4">
-                <button
-                  onClick={() => fetchNextPage()}
-                  disabled={isFetchingNextPage}
-                  className="flex items-center gap-2 px-4 py-2 text-sm rounded-lg bg-white/5 text-white/70 hover:bg-white/10 transition-colors disabled:opacity-50"
-                >
-                  {isFetchingNextPage ? (
-                    <><Loader2 className="h-4 w-4 animate-spin" /> Loading...</>
-                  ) : (
-                    <><ChevronDown className="h-4 w-4" /> Load More</>
-                  )}
-                </button>
-              </div>
-            )}
+            {/* Infinite scroll sentinel */}
+            <div ref={loadMoreRef} className="flex justify-center py-6">
+              {isFetchingNextPage && (
+                <Loader2 className="h-6 w-6 animate-spin text-white/40" />
+              )}
+            </div>
           </>
         )}
       </div>
+
+      {/* Model detail modal */}
+      <CivitaiModelDetailModal
+        model={selectedModel}
+        onClose={() => setSelectedModel(null)}
+        getDownloadJob={getDownloadJob}
+        isVersionDownloaded={isVersionDownloaded}
+        onDownloadVersion={handleDownloadVersion}
+        cancelMutation={cancelMutation}
+      />
     </>
   )
 }
@@ -782,11 +843,13 @@ function CivitaiModelCard({
   downloadJob,
   isDownloaded,
   onDownload,
+  onClick,
 }: {
   model: CivitaiModelSummary
   downloadJob?: CivitaiDownloadJob
   isDownloaded: boolean
   onDownload: () => void
+  onClick: () => void
 }) {
   const version = model.modelVersions[0]
   const thumbnail = version?.images[0]?.url
@@ -796,7 +859,7 @@ function CivitaiModelCard({
   const isQueued = downloadJob?.status === 'queued'
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden transition-all hover:border-primary/30">
+    <div className="rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden transition-all hover:border-primary/30 cursor-pointer" onClick={onClick}>
       {/* Thumbnail */}
       <div className="aspect-[4/3] bg-white/5 relative overflow-hidden">
         {thumbnail ? (
@@ -892,6 +955,267 @@ function formatCivitaiSpeed(bytesPerSec: number): string {
   const mbps = bytesPerSec / (1024 * 1024)
   if (mbps >= 1) return `${mbps.toFixed(1)} MB/s`
   return `${(bytesPerSec / 1024).toFixed(0)} KB/s`
+}
+
+// =============================================================================
+// Civitai Model Detail Modal
+// =============================================================================
+
+function CivitaiModelDetailModal({
+  model,
+  onClose,
+  getDownloadJob,
+  isVersionDownloaded,
+  onDownloadVersion,
+  cancelMutation,
+}: {
+  model: CivitaiModelSummary | null
+  onClose: () => void
+  getDownloadJob: (versionId: number | undefined) => CivitaiDownloadJob | undefined
+  isVersionDownloaded: (versionId: number | undefined) => boolean
+  onDownloadVersion: (model: CivitaiModelSummary, version: CivitaiModelVersion) => void
+  cancelMutation: ReturnType<typeof useMutation<void, Error, string>>
+}) {
+  const [selectedImageIdx, setSelectedImageIdx] = useState(0)
+
+  // Reset image index when model changes
+  useEffect(() => {
+    setSelectedImageIdx(0)
+  }, [model?.id])
+
+  if (!model) return null
+
+  // Collect all images across all versions
+  const allImages = model.modelVersions
+    .flatMap((v) => v.images.map((img) => ({ ...img, versionName: v.name })))
+    .filter((img) => img.url)
+
+  const currentImage = allImages[selectedImageIdx]
+
+  // Strip HTML tags from description for clean display
+  const cleanDescription = model.description
+    ? model.description.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+    : null
+
+  return (
+    <Dialog open={!!model} onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-0">
+        <div className="overflow-y-auto">
+          {/* Image gallery */}
+          <div className="relative bg-black/40">
+            {currentImage?.url ? (
+              <div className="relative">
+                <img
+                  src={currentImage.url}
+                  alt={model.name}
+                  className="w-full max-h-[400px] object-contain"
+                />
+                {/* Image navigation */}
+                {allImages.length > 1 && (
+                  <>
+                    <button
+                      onClick={() => setSelectedImageIdx((i) => (i - 1 + allImages.length) % allImages.length)}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/60 text-white/80 hover:bg-black/80 transition-colors"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+                    <button
+                      onClick={() => setSelectedImageIdx((i) => (i + 1) % allImages.length)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/60 text-white/80 hover:bg-black/80 transition-colors"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                    <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex gap-1">
+                      {allImages.slice(0, 12).map((_, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setSelectedImageIdx(i)}
+                          className={cn(
+                            'w-1.5 h-1.5 rounded-full transition-colors',
+                            i === selectedImageIdx ? 'bg-white' : 'bg-white/40'
+                          )}
+                        />
+                      ))}
+                      {allImages.length > 12 && (
+                        <span className="text-[10px] text-white/60 ml-1">+{allImages.length - 12}</span>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="h-48 flex items-center justify-center text-white/30">
+                No preview available
+              </div>
+            )}
+          </div>
+
+          {/* Content */}
+          <div className="p-6 space-y-5">
+            {/* Header */}
+            <DialogHeader>
+              <div className="flex items-start justify-between gap-4 pr-8">
+                <div>
+                  <DialogTitle className="text-xl">{model.name}</DialogTitle>
+                  <DialogDescription className="mt-1.5 flex items-center gap-3">
+                    {model.creator?.username && (
+                      <span className="flex items-center gap-1">
+                        <User className="h-3.5 w-3.5" />
+                        {model.creator.username}
+                      </span>
+                    )}
+                    <span className="px-2 py-0.5 text-[11px] rounded bg-white/10 text-white/60">
+                      {model.type || 'Model'}
+                    </span>
+                  </DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+
+            {/* Stats row */}
+            <div className="flex items-center gap-4 text-sm text-white/50">
+              {model.stats?.downloadCount != null && (
+                <span className="flex items-center gap-1.5">
+                  <ArrowDownToLine className="h-4 w-4" />
+                  {formatCivitaiCount(model.stats.downloadCount)} downloads
+                </span>
+              )}
+              {model.stats?.rating != null && model.stats.rating > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <Star className="h-4 w-4" />
+                  {model.stats.rating.toFixed(1)}
+                  {model.stats.ratingCount ? ` (${formatCivitaiCount(model.stats.ratingCount)})` : ''}
+                </span>
+              )}
+              {model.stats?.favoriteCount != null && model.stats.favoriteCount > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <Heart className="h-4 w-4" />
+                  {formatCivitaiCount(model.stats.favoriteCount)}
+                </span>
+              )}
+            </div>
+
+            {/* Tags */}
+            {model.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {model.tags.map((tag) => (
+                  <span key={tag} className="px-2 py-0.5 text-xs rounded-full bg-white/5 text-white/50">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Description */}
+            {cleanDescription && (
+              <div>
+                <h3 className="text-sm font-medium text-white/70 mb-2 flex items-center gap-1.5">
+                  <FileText className="h-3.5 w-3.5" /> Description
+                </h3>
+                <p className="text-sm text-white/50 leading-relaxed line-clamp-6">
+                  {cleanDescription}
+                </p>
+              </div>
+            )}
+
+            {/* Versions */}
+            <div>
+              <h3 className="text-sm font-medium text-white/70 mb-3">
+                Versions ({model.modelVersions.length})
+              </h3>
+              <div className="space-y-2">
+                {model.modelVersions.map((version) => {
+                  const file = version.files[0]
+                  const fileSizeMB = file?.sizeKB ? (file.sizeKB / 1024).toFixed(0) : null
+                  const downloaded = isVersionDownloaded(version.id)
+                  const job = getDownloadJob(version.id)
+                  const isDownloading = job?.status === 'downloading'
+                  const isQueued = job?.status === 'queued'
+
+                  return (
+                    <div
+                      key={version.id}
+                      className="flex items-center justify-between gap-3 p-3 rounded-lg border border-white/5 bg-white/[0.02]"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-white truncate">{version.name}</span>
+                          {version.baseModel && (
+                            <span className="flex-shrink-0 px-1.5 py-0.5 text-[10px] rounded bg-primary/20 text-primary">
+                              {version.baseModel}
+                            </span>
+                          )}
+                        </div>
+                        {fileSizeMB && (
+                          <span className="text-xs text-white/40 mt-0.5 block">
+                            {file?.name || 'model file'} &middot; {fileSizeMB} MB
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex-shrink-0">
+                        {downloaded ? (
+                          <span className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-green-500/10 text-green-400 border border-green-500/20">
+                            <Check className="h-3.5 w-3.5" /> Downloaded
+                          </span>
+                        ) : isDownloading && job ? (
+                          <div className="flex items-center gap-2 min-w-[120px]">
+                            <div className="flex-1">
+                              <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                                <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${job.progress}%` }} />
+                              </div>
+                            </div>
+                            <span className="text-[10px] text-white/50 w-8 text-right">{job.progress.toFixed(0)}%</span>
+                            <button
+                              onClick={() => cancelMutation.mutate(job.id)}
+                              className="text-white/30 hover:text-red-400"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          </div>
+                        ) : isQueued ? (
+                          <span className="flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg bg-white/5 text-white/40">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Queued
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => onDownloadVersion(model, version)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors"
+                          >
+                            <Download className="h-3.5 w-3.5" /> Download
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Thumbnail strip */}
+            {allImages.length > 1 && (
+              <div>
+                <h3 className="text-sm font-medium text-white/70 mb-2">Gallery</h3>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {allImages.map((img, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setSelectedImageIdx(i)}
+                      className={cn(
+                        'flex-shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-colors',
+                        i === selectedImageIdx ? 'border-primary' : 'border-transparent hover:border-white/20'
+                      )}
+                    >
+                      <img src={img.url!} alt="" className="w-full h-full object-cover" loading="lazy" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 // =============================================================================

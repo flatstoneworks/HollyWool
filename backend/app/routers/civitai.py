@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Response
 from typing import Optional
 
 from ..models.civitai_schemas import (
@@ -17,6 +17,7 @@ router = APIRouter(prefix="/api/civitai", tags=["civitai"])
 
 @router.get("/models")
 async def search_models(
+    response: Response,
     query: Optional[str] = None,
     types: Optional[str] = None,
     sort: Optional[str] = "Highest Rated",
@@ -36,16 +37,18 @@ async def search_models(
             limit=limit,
             cursor=cursor,
         )
+        response.headers["Cache-Control"] = "private, max-age=300"  # 5 min
         return data
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Civitai API error: {str(e)}")
 
 
 @router.get("/models/{model_id}")
-async def get_model(model_id: int):
+async def get_model(model_id: int, response: Response):
     client = get_civitai_client()
     try:
         data = await client.get_model(model_id)
+        response.headers["Cache-Control"] = "private, max-age=900"  # 15 min
         return data
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Civitai API error: {str(e)}")
