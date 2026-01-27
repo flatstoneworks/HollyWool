@@ -161,16 +161,110 @@ export function CivitaiModelDetailPage() {
     : null
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Back link */}
-      <div className="flex-shrink-0 px-6 py-3 border-b border-border">
-        <button
-          onClick={() => navigate(-1)}
-          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Back
-        </button>
+    <div className="flex flex-col h-full w-full overflow-hidden">
+      {/* App bar */}
+      <div className="flex-shrink-0 px-6 py-4 border-b border-border space-y-3">
+        {/* Row 1: Back + Title + Download */}
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex-shrink-0 p-1 -ml-1 text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-5 w-5" />
+          </button>
+          <h1 className="text-lg font-semibold truncate flex-1">{model.name}</h1>
+          {(() => {
+            const latestVersion = model.modelVersions[0]
+            if (!latestVersion) return null
+            const downloaded = isVersionDownloaded(latestVersion.id)
+            const job = getDownloadJob(latestVersion.id)
+            const isDownloading = job?.status === 'downloading'
+            const isQueued = job?.status === 'queued'
+            if (downloaded) {
+              return (
+                <span className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-green-500/10 text-green-400 border border-green-500/20">
+                  <Check className="h-4 w-4" /> Downloaded
+                </span>
+              )
+            }
+            if (isDownloading && job) {
+              return (
+                <div className="flex-shrink-0 flex items-center gap-2 min-w-[180px]">
+                  <div className="flex-1">
+                    <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                      <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${job.progress}%` }} />
+                    </div>
+                  </div>
+                  <span className="text-xs text-white/50 w-9 text-right">{job.progress.toFixed(0)}%</span>
+                  <span className="text-xs text-white/40">{formatSpeed(job.speed_bytes_per_sec)}</span>
+                  <button
+                    onClick={() => cancelMutation.mutate(job.id)}
+                    className="text-white/30 hover:text-red-400"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )
+            }
+            if (isQueued) {
+              return (
+                <span className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-white/5 text-white/40">
+                  <Loader2 className="h-4 w-4 animate-spin" /> Queued
+                </span>
+              )
+            }
+            return (
+              <button
+                onClick={() => handleDownloadVersion(model, latestVersion)}
+                className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 text-sm rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors"
+              >
+                <Download className="h-4 w-4" /> Download
+              </button>
+            )
+          })()}
+        </div>
+
+        {/* Row 2: Meta info */}
+        <div className="flex items-center gap-3 flex-wrap text-sm text-muted-foreground">
+          {model.creator?.username && (
+            <span className="flex items-center gap-1">
+              <User className="h-3.5 w-3.5" />
+              {model.creator.username}
+            </span>
+          )}
+          <span className="px-2 py-0.5 text-[11px] rounded bg-white/10 text-white/60">
+            {model.type || 'Model'}
+          </span>
+          {model.stats?.downloadCount != null && (
+            <span className="flex items-center gap-1">
+              <ArrowDownToLine className="h-3.5 w-3.5" />
+              {formatCount(model.stats.downloadCount)}
+            </span>
+          )}
+          {model.stats?.rating != null && model.stats.rating > 0 && (
+            <span className="flex items-center gap-1">
+              <Star className="h-3.5 w-3.5" />
+              {model.stats.rating.toFixed(1)}
+              {model.stats.ratingCount ? ` (${formatCount(model.stats.ratingCount)})` : ''}
+            </span>
+          )}
+          {model.stats?.favoriteCount != null && model.stats.favoriteCount > 0 && (
+            <span className="flex items-center gap-1">
+              <Heart className="h-3.5 w-3.5" />
+              {formatCount(model.stats.favoriteCount)}
+            </span>
+          )}
+          {model.tags.length > 0 && (
+            <>
+              <span className="w-px h-4 bg-white/10" />
+              {model.tags.map((tag) => (
+                <span key={tag} className="px-2 py-0.5 text-[11px] rounded-full bg-white/5 text-white/40">
+                  {tag}
+                </span>
+              ))}
+            </>
+          )}
+        </div>
       </div>
 
       {/* Two-column layout */}
@@ -271,56 +365,6 @@ export function CivitaiModelDetailPage() {
 
         {/* Right column — Details & Downloads */}
         <div className="flex-1 min-w-[380px] overflow-y-auto p-6 space-y-6">
-          {/* Model header */}
-          <div>
-            <h1 className="text-2xl font-semibold">{model.name}</h1>
-            <div className="flex items-center gap-3 mt-1.5 text-sm text-muted-foreground">
-              {model.creator?.username && (
-                <span className="flex items-center gap-1">
-                  <User className="h-3.5 w-3.5" />
-                  {model.creator.username}
-                </span>
-              )}
-              <span className="px-2 py-0.5 text-[11px] rounded bg-white/10 text-white/60">
-                {model.type || 'Model'}
-              </span>
-            </div>
-          </div>
-
-          {/* Stats */}
-          <div className="flex items-center gap-4 text-sm text-muted-foreground">
-            {model.stats?.downloadCount != null && (
-              <span className="flex items-center gap-1.5">
-                <ArrowDownToLine className="h-4 w-4" />
-                {formatCount(model.stats.downloadCount)}
-              </span>
-            )}
-            {model.stats?.rating != null && model.stats.rating > 0 && (
-              <span className="flex items-center gap-1.5">
-                <Star className="h-4 w-4" />
-                {model.stats.rating.toFixed(1)}
-                {model.stats.ratingCount ? ` (${formatCount(model.stats.ratingCount)})` : ''}
-              </span>
-            )}
-            {model.stats?.favoriteCount != null && model.stats.favoriteCount > 0 && (
-              <span className="flex items-center gap-1.5">
-                <Heart className="h-4 w-4" />
-                {formatCount(model.stats.favoriteCount)}
-              </span>
-            )}
-          </div>
-
-          {/* Tags */}
-          {model.tags.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {model.tags.map((tag) => (
-                <span key={tag} className="px-2 py-0.5 text-xs rounded-full bg-white/5 text-white/50">
-                  {tag}
-                </span>
-              ))}
-            </div>
-          )}
-
           {/* Description */}
           {cleanDescription && (
             <div>
