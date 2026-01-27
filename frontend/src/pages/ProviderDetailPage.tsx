@@ -30,7 +30,7 @@ import {
   type TestConnectionResponse,
   type DiscoveredModel,
 } from '@/api/client'
-import { PROVIDERS } from '@/data/previewModels'
+import { PROVIDER_PRESETS, PREVIEW_MODELS, type ModelProvider } from '@/types/providers'
 
 // Providers that support auto-discovery
 const DISCOVERY_PROVIDERS = new Set(['krea', 'fal'])
@@ -42,7 +42,10 @@ export function ProviderDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
-  const provider = providerId ? PROVIDERS[providerId] : undefined
+  const preset = providerId ? PROVIDER_PRESETS[providerId as ModelProvider] : undefined
+  const provider = preset
+    ? { ...preset, models: PREVIEW_MODELS[providerId as ModelProvider] || [] }
+    : undefined
   const supportsDiscovery = providerId ? DISCOVERY_PROVIDERS.has(providerId) : false
 
   // Form state

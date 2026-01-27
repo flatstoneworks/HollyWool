@@ -18,6 +18,20 @@ import SettingsPage from './pages/SettingsPage'
 import RequestLogsPage from './pages/RequestLogsPage'
 import './index.css'
 
+// Redirect to spark.local if running on a DGX Spark and accessed via localhost
+if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+  fetch('/api/health')
+    .then(r => r.json())
+    .then(data => {
+      if (data.hostname) {
+        window.location.replace(
+          `${window.location.protocol}//${data.hostname}:${window.location.port}${window.location.pathname}${window.location.search}${window.location.hash}`
+        )
+      }
+    })
+    .catch(() => {})
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

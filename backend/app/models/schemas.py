@@ -167,6 +167,7 @@ class HealthResponse(BaseModel):
     status: str
     gpu_available: bool
     current_model: Optional[str]
+    hostname: Optional[str] = None
 
 
 # Detailed model info for Models page

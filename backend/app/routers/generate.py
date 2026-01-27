@@ -96,6 +96,18 @@ def get_output_dir() -> Path:
     return output_dir
 
 
+def _detect_hostname() -> str | None:
+    """Detect preferred hostname. Returns 'spark.local' on DGX Spark devices."""
+    try:
+        with open("/etc/dgx-release") as f:
+            for line in f:
+                if "DGX Spark" in line:
+                    return "spark.local"
+    except FileNotFoundError:
+        pass
+    return None
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
     service = get_inference_service()
@@ -103,6 +115,7 @@ async def health_check():
         status="ok",
         gpu_available=service.is_gpu_available(),
         current_model=service.current_model_id,
+        hostname=_detect_hostname(),
     )
 
 
