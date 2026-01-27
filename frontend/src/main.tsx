@@ -14,6 +14,7 @@ import { JobDetailPage } from './pages/JobDetailPage'
 import { ModelDetailPage } from './pages/ModelDetailPage'
 import { AssetDetailPage } from './pages/AssetDetailPage'
 import { VideoAssetDetailPage } from './pages/VideoAssetDetailPage'
+import { BulkOperationPage } from './pages/BulkOperationPage'
 import SettingsPage from './pages/SettingsPage'
 import RequestLogsPage from './pages/RequestLogsPage'
 import { Toaster } from './components/ui/toaster'
@@ -75,6 +76,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
               <Route index element={<Navigate to="/image" replace />} />
               <Route path="image" element={<ImagePage />} />
               <Route path="video" element={<VideoPage />} />
+              <Route path="bulk" element={<BulkOperationPage />} />
               <Route path="assets" element={<AssetsPage />} />
               <Route path="models" element={<ModelsPage />} />
               <Route path="models/civitai/:modelId" element={<CivitaiModelDetailPage />} />

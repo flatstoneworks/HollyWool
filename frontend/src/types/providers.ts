@@ -1,10 +1,11 @@
-export type ModelProvider = 'krea' | 'higgsfield' | 'fal'
+export type ModelProvider = 'krea' | 'higgsfield' | 'fal' | 'anthropic'
 
 export interface ProviderPreset {
   name: string
   description: string
   website?: string
-  capabilities: ('image' | 'video')[]
+  capabilities: ('image' | 'video' | 'llm')[]
+  category?: 'image' | 'llm'
   envVar: string
 }
 
@@ -37,6 +38,14 @@ export const PROVIDER_PRESETS: Record<ModelProvider, ProviderPreset> = {
     website: 'https://fal.ai',
     capabilities: ['image', 'video'],
     envVar: 'FAL_KEY',
+  },
+  anthropic: {
+    name: 'Anthropic',
+    description: 'Claude AI for prompt generation and LLM tasks',
+    website: 'https://console.anthropic.com',
+    capabilities: ['llm'],
+    category: 'llm',
+    envVar: 'ANTHROPIC_API_KEY',
   },
 }
 
@@ -103,4 +112,5 @@ export const PREVIEW_MODELS: Record<ModelProvider, PreviewModel[]> = {
       tags: ['luma', 'video'],
     },
   ],
+  anthropic: [],
 }

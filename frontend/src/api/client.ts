@@ -199,17 +199,18 @@ export interface AppSettings {
   auto_save_history: boolean
   max_log_entries: number
   favorite_models: string[]
+  civitai_api_key: string | null
 }
 
 export interface RequestLog {
   id: string
   timestamp: string
-  type: 'image' | 'video' | 'i2v'
+  type: 'image' | 'video' | 'i2v' | 'download'
   prompt: string
   negative_prompt: string | null
   model: string
   parameters: Record<string, unknown>
-  status: 'pending' | 'generating' | 'completed' | 'failed'
+  status: 'pending' | 'generating' | 'downloading' | 'completed' | 'failed'
   duration_ms: number | null
   error: string | null
   result_id: string | null
@@ -567,6 +568,69 @@ export interface UpscaleJobListResponse {
   jobs: UpscaleJob[]
 }
 
+// ============== Bulk Operation Types ==============
+
+export interface BulkVariationRequest {
+  base_prompt: string
+  count: number
+  style_guidance?: string
+  claude_model?: string
+}
+
+export interface BulkVariationResponse {
+  variations: string[]
+  base_prompt: string
+  count: number
+}
+
+export interface BulkImageRequest {
+  prompts: string[]
+  fal_model?: string
+  width?: number
+  height?: number
+  steps?: number
+  base_prompt?: string
+}
+
+export interface BulkImageItem {
+  index: number
+  prompt: string
+  status: 'pending' | 'generating' | 'completed' | 'failed'
+  image_url: string | null
+  asset_id: string | null
+  error: string | null
+  seed: number | null
+}
+
+export interface BulkJob {
+  id: string
+  status: string
+  progress: number
+  total: number
+  completed: number
+  failed: number
+  items: BulkImageItem[]
+  base_prompt: string | null
+  fal_model: string
+  width: number
+  height: number
+  steps: number | null
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+  error: string | null
+}
+
+export interface BulkJobResponse {
+  job_id: string
+  status: string
+  message: string
+}
+
+export interface BulkJobListResponse {
+  jobs: BulkJob[]
+}
+
 // ============== Provider Types ==============
 
 export interface ProviderConfig {
@@ -711,6 +775,21 @@ export interface CivitaiDownloadJob {
   completed_at?: string
 }
 
+export interface HFDownloadJob {
+  id: string
+  model_id: string
+  model_name: string
+  model_path: string
+  status: 'downloading' | 'completed' | 'failed'
+  progress: number
+  total_size_mb: number
+  speed_mbps: number
+  error?: string
+  created_at: string
+  started_at?: string
+  completed_at?: string
+}
+
 export const api = {
   async health(): Promise<HealthResponse> {
     const res = await fetch(`${API_BASE}/health`)
@@ -765,6 +844,12 @@ export const api = {
       const error = await res.json().catch(() => ({ detail: 'Failed to start download' }))
       throw new Error(error.detail || 'Failed to start download')
     }
+    return res.json()
+  },
+
+  async getHFDownloads(): Promise<HFDownloadJob[]> {
+    const res = await fetch(`${API_BASE}/models/downloads`)
+    if (!res.ok) throw new Error('Failed to fetch HF downloads')
     return res.json()
   },
 
@@ -1198,5 +1283,52 @@ export const api = {
       method: 'DELETE',
     })
     if (!res.ok) throw new Error('Failed to cancel download')
+  },
+
+  // ============== Bulk Operation Endpoints ==============
+
+  async generateVariations(request: BulkVariationRequest): Promise<BulkVariationResponse> {
+    const res = await fetch(`${API_BASE}/bulk/variations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Failed to generate variations' }))
+      throw new Error(error.detail || 'Failed to generate variations')
+    }
+    return res.json()
+  },
+
+  async createBulkJob(request: BulkImageRequest): Promise<BulkJobResponse> {
+    const res = await fetch(`${API_BASE}/bulk/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Failed to create bulk job' }))
+      throw new Error(error.detail || 'Failed to create bulk job')
+    }
+    return res.json()
+  },
+
+  async getBulkJob(jobId: string): Promise<BulkJob> {
+    const res = await fetch(`${API_BASE}/bulk/jobs/${jobId}`)
+    if (!res.ok) throw new Error('Bulk job not found')
+    return res.json()
+  },
+
+  async getBulkJobs(): Promise<BulkJobListResponse> {
+    const res = await fetch(`${API_BASE}/bulk/jobs`)
+    if (!res.ok) throw new Error('Failed to fetch bulk jobs')
+    return res.json()
+  },
+
+  async deleteBulkJob(jobId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/bulk/jobs/${jobId}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error('Failed to delete bulk job')
   },
 }

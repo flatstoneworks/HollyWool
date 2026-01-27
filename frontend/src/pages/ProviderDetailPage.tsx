@@ -179,6 +179,11 @@ export function ProviderDetailPage() {
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <h1 className="text-2xl font-semibold">{provider.name}</h1>
+              {provider.category === 'llm' && (
+                <span className="text-xs bg-purple-500/15 text-purple-400 px-2 py-0.5 rounded font-medium">
+                  LLM
+                </span>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -194,9 +199,14 @@ export function ProviderDetailPage() {
               {provider.capabilities.map((cap) => (
                 <span
                   key={cap}
-                  className="text-xs bg-muted px-2 py-0.5 rounded text-muted-foreground"
+                  className={cn(
+                    'text-xs px-2 py-0.5 rounded',
+                    cap === 'llm'
+                      ? 'bg-purple-500/15 text-purple-400'
+                      : 'bg-muted text-muted-foreground'
+                  )}
                 >
-                  {cap}
+                  {cap === 'llm' ? 'LLM' : cap}
                 </span>
               ))}
             </div>

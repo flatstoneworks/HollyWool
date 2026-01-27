@@ -463,3 +463,74 @@ class UpscaleJobResponse(BaseModel):
 class UpscaleJobListResponse(BaseModel):
     """Response listing upscale jobs."""
     jobs: list[UpscaleJob]
+
+
+# ============== Bulk Operation Schemas ==============
+
+class BulkVariationRequest(BaseModel):
+    """Request to generate prompt variations via Claude."""
+    base_prompt: str = Field(..., min_length=1, max_length=2000)
+    count: int = Field(default=10, ge=1, le=200)
+    style_guidance: Optional[str] = Field(default=None, max_length=1000)
+    claude_model: str = Field(default="claude-sonnet-4-20250514")
+
+
+class BulkVariationResponse(BaseModel):
+    """Response containing generated prompt variations."""
+    variations: list[str]
+    base_prompt: str
+    count: int
+
+
+class BulkImageItem(BaseModel):
+    """Status of a single image in a bulk job."""
+    index: int
+    prompt: str
+    status: str = "pending"  # pending, generating, completed, failed
+    image_url: Optional[str] = None
+    asset_id: Optional[str] = None
+    error: Optional[str] = None
+    seed: Optional[int] = None
+
+
+class BulkImageRequest(BaseModel):
+    """Request to start bulk image generation."""
+    prompts: list[str] = Field(..., min_length=1, max_length=200)
+    fal_model: str = Field(default="fal-ai/flux/schnell")
+    width: int = Field(default=1024, ge=256, le=2048)
+    height: int = Field(default=1024, ge=256, le=2048)
+    steps: Optional[int] = Field(default=None, ge=1, le=100)
+    base_prompt: Optional[str] = None
+
+
+class BulkJob(BaseModel):
+    """A bulk image generation job."""
+    id: str
+    session_id: Optional[str] = None
+    status: str = JobStatus.QUEUED
+    progress: float = 0.0
+    total: int = 0
+    completed: int = 0
+    failed: int = 0
+    items: list[BulkImageItem] = []
+    base_prompt: Optional[str] = None
+    fal_model: str = "fal-ai/flux/schnell"
+    width: int = 1024
+    height: int = 1024
+    steps: Optional[int] = None
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    error: Optional[str] = None
+
+
+class BulkJobResponse(BaseModel):
+    """Response when creating a bulk job."""
+    job_id: str
+    status: str
+    message: str
+
+
+class BulkJobListResponse(BaseModel):
+    """Response listing bulk jobs."""
+    jobs: list[BulkJob]

@@ -18,14 +18,22 @@ KNOWN_PROVIDERS = {
     "krea": {
         "name": "KREA",
         "default_api_url": "https://api.krea.ai",
+        "category": "image",
     },
     "higgsfield": {
         "name": "Higgsfield",
         "default_api_url": "https://api.higgsfield.ai",
+        "category": "image",
     },
     "fal": {
         "name": "fal",
         "default_api_url": "https://fal.run",
+        "category": "image",
+    },
+    "anthropic": {
+        "name": "Anthropic",
+        "default_api_url": "https://api.anthropic.com",
+        "category": "llm",
     },
 }
 
