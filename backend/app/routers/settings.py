@@ -41,7 +41,13 @@ class AppSettings(BaseModel):
 
 
 class SystemInfo(BaseModel):
+    app_name: str = "HollyWool"
     version: str
+    hostname: str
+    os_name: str  # "macOS Tahoe 26.2", "Ubuntu 24.04", "Windows 11"
+    platform: str  # "mac", "linux", "windows"
+    device_type: str  # "Spark", "Mac", "PC"
+    compute_mode: str  # "GPU", "CPU"
     cuda_available: bool
     gpu_name: Optional[str] = None
     gpu_memory_gb: Optional[float] = None
@@ -216,6 +222,8 @@ async def delete_log(log_id: str):
 async def get_system_info():
     """Get system information."""
     import sys
+    import socket
+    import platform as plat
 
     cuda_available = False
     gpu_name = None
@@ -232,8 +240,51 @@ async def get_system_info():
     except ImportError:
         pass
 
+    # Hostname
+    hostname = socket.gethostname()
+
+    # Detect platform and OS name
+    system = plat.system().lower()
+    if system == "darwin":
+        platform_name = "mac"
+        mac_ver = plat.mac_ver()[0]
+        os_name = f"macOS {mac_ver}" if mac_ver else "macOS"
+    elif system == "linux":
+        platform_name = "linux"
+        try:
+            import distro
+            os_name = f"{distro.name()} {distro.version()}"
+        except ImportError:
+            os_name = f"Linux {plat.release()}"
+    elif system == "windows":
+        platform_name = "windows"
+        os_name = f"Windows {plat.version()}"
+    else:
+        platform_name = system
+        os_name = plat.platform()
+
+    # Determine device type
+    if cuda_available and gpu_name and "dgx" in gpu_name.lower():
+        device_type = "Spark"
+    elif platform_name == "mac":
+        device_type = "Mac"
+    elif platform_name == "linux" and cuda_available:
+        device_type = "Spark"
+    elif platform_name == "windows":
+        device_type = "PC"
+    else:
+        device_type = "PC"
+
+    compute_mode = "GPU" if cuda_available else "CPU"
+
     return SystemInfo(
+        app_name="HollyWool",
         version="1.0.0",
+        hostname=hostname,
+        os_name=os_name,
+        platform=platform_name,
+        device_type=device_type,
+        compute_mode=compute_mode,
         cuda_available=cuda_available,
         gpu_name=gpu_name,
         gpu_memory_gb=gpu_memory_gb,

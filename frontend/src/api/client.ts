@@ -215,7 +215,13 @@ export interface RequestLogsResponse {
 }
 
 export interface SystemInfo {
+  app_name: string
   version: string
+  hostname: string
+  os_name: string
+  platform: string
+  device_type: string
+  compute_mode: string
   cuda_available: boolean
   gpu_name: string | null
   gpu_memory_gb: number | null
