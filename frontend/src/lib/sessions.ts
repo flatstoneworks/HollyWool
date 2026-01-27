@@ -1,162 +1,43 @@
-// Session management with backend persistence
+// Session management with backend persistence — uses generic session manager
 import { api, type Session, type SessionsData } from '@/api/client'
+import { createSessionManager } from './session-manager'
 
 export type { Session, SessionsData }
+export { generateId } from './session-manager'
 
-// Local cache
-let sessionsCache: Session[] = []
-let currentSessionIdCache: string | null = null
-let initialized = false
+const manager = createSessionManager<Session>({
+  loadFn: api.getSessions,
+  saveFn: api.saveSessions,
+  namePrefix: 'Session',
+  createDefaults: () => ({ batchIds: [] }) as Partial<Session>,
+})
 
-export function generateId(): string {
-  return Math.random().toString(36).substring(2, 15)
-}
+// Re-export all manager methods with the original names
+export const initSessions = manager.init
+export const getSessions = manager.getSessions
+export const getSession = manager.getSession
+export const getCurrentSessionId = manager.getCurrentSessionId
+export const setCurrentSessionId = manager.setCurrentSessionId
+export const createSession = manager.createSession
+export const updateSession = manager.updateSession
+export const autoRenameSession = manager.autoRenameSession
+export const deleteSession = manager.deleteSession
+export const renameSession = manager.renameSession
+export const ensureCurrentSession = manager.ensureCurrentSession
+export const isInitialized = manager.isInitialized
 
-// Initialize sessions from backend
-export async function initSessions(): Promise<SessionsData> {
-  try {
-    const data = await api.getSessions()
-    sessionsCache = data.sessions
-    currentSessionIdCache = data.currentSessionId
-    initialized = true
-    return data
-  } catch (error) {
-    console.error('Failed to load sessions from backend:', error)
-    // Return empty data on error
-    sessionsCache = []
-    currentSessionIdCache = null
-    initialized = true
-    return { sessions: [], currentSessionId: null }
-  }
-}
-
-// Save sessions to backend
-async function persistSessions(): Promise<void> {
-  try {
-    await api.saveSessions({
-      sessions: sessionsCache,
-      currentSessionId: currentSessionIdCache,
-    })
-  } catch (error) {
-    console.error('Failed to save sessions to backend:', error)
-  }
-}
-
-export function getSessions(): Session[] {
-  return sessionsCache
-}
-
-export function getCurrentSessionId(): string | null {
-  return currentSessionIdCache
-}
-
-export function setCurrentSessionId(id: string): void {
-  currentSessionIdCache = id
-  persistSessions()
-}
-
-export function createSession(name?: string): Session {
-  const session: Session = {
-    id: generateId(),
-    name: name || `Session ${sessionsCache.length + 1}`,
-    createdAt: new Date().toISOString(),
-    batchIds: [],
-  }
-  sessionsCache.unshift(session) // Add to beginning
-  currentSessionIdCache = session.id
-  persistSessions()
-  return session
-}
-
-export function getSession(id: string): Session | undefined {
-  return sessionsCache.find(s => s.id === id)
-}
-
-export function updateSession(id: string, updates: Partial<Session>): void {
-  const index = sessionsCache.findIndex(s => s.id === id)
-  if (index !== -1 && sessionsCache[index]) {
-    const current = sessionsCache[index]!
-    sessionsCache[index] = { ...current, ...updates }
-    persistSessions()
-  }
-}
-
+// Image-specific: add a batch ID to a session
 export function addBatchToSession(sessionId: string, batchId: string, thumbnail?: string): void {
-  const session = sessionsCache.find(s => s.id === sessionId)
+  const session = manager.getSession(sessionId)
   if (session && !session.batchIds.includes(batchId)) {
-    session.batchIds.unshift(batchId) // Add to beginning (newest first)
+    session.batchIds.unshift(batchId)
     if (thumbnail) {
       session.thumbnail = thumbnail
     }
-    persistSessions()
+    manager.updateSession(sessionId, { ...session })
   }
 }
 
 export function updateSessionThumbnail(sessionId: string, thumbnail: string): void {
-  const session = sessionsCache.find(s => s.id === sessionId)
-  if (session) {
-    session.thumbnail = thumbnail
-    persistSessions()
-  }
-}
-
-export function autoRenameSession(sessionId: string, name: string): void {
-  const session = sessionsCache.find(s => s.id === sessionId)
-  // Only auto-rename if the session hasn't been manually renamed
-  if (session && (session.isAutoNamed !== false)) {
-    session.name = name
-    session.isAutoNamed = true
-    persistSessions()
-  }
-}
-
-export function deleteSession(id: string): void {
-  sessionsCache = sessionsCache.filter(s => s.id !== id)
-
-  // If deleted current session, switch to another or create new
-  if (currentSessionIdCache === id) {
-    if (sessionsCache.length > 0) {
-      currentSessionIdCache = sessionsCache[0]!.id
-    } else {
-      const newSession = createSession()
-      currentSessionIdCache = newSession.id
-      return // createSession already persists
-    }
-  }
-  persistSessions()
-}
-
-export function renameSession(id: string, name: string): void {
-  updateSession(id, { name, isAutoNamed: false }) // Mark as manually renamed
-}
-
-// Get or create a current session
-export async function ensureCurrentSession(): Promise<Session> {
-  if (!initialized) {
-    await initSessions()
-  }
-
-  // Try to use the current session from backend
-  if (currentSessionIdCache) {
-    const session = getSession(currentSessionIdCache)
-    if (session) return session
-  }
-
-  // If currentSessionId doesn't match but we have sessions, use the first one
-  // This prevents overwriting existing sessions when a new browser connects
-  if (sessionsCache.length > 0) {
-    const firstSession = sessionsCache[0]!
-    currentSessionIdCache = firstSession.id
-    // Only persist if we're changing the current session ID
-    persistSessions()
-    return firstSession
-  }
-
-  // Only create a new session if there are truly NO sessions
-  return createSession()
-}
-
-// Check if sessions are initialized
-export function isInitialized(): boolean {
-  return initialized
+  manager.updateSessionThumbnail(sessionId, thumbnail)
 }

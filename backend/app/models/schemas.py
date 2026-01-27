@@ -9,6 +9,14 @@ class ModelInfo(BaseModel):
     type: str
     default_steps: int
     default_guidance: float
+    category: str = ""
+    description: str = ""
+    tags: list[str] = []
+    size_gb: float = 0
+    requires_approval: bool = False
+    approval_url: Optional[str] = None
+    is_cached: bool = False
+    hf_path: str = ""
 
 
 # ============== LoRA Schemas ==============

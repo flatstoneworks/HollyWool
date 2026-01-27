@@ -55,7 +55,7 @@ get_torch_cuda_index() {
         echo "cu126"
     elif [ "$major" -eq 12 ] && [ "$minor" -ge 4 ]; then
         echo "cu124"
-    elif [ "$major" -ge 11 ] && [ "$minor" -ge 8 ]; then
+    elif [ "$major" -eq 12 ] || { [ "$major" -eq 11 ] && [ "$minor" -ge 8 ]; }; then
         echo "cu118"
     else
         echo ""

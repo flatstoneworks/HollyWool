@@ -16,49 +16,12 @@ import {
   type CivitaiDownloadJob,
 } from '@/api/client'
 import { cn } from '@/lib/utils'
+import { useFavorites } from '@/hooks/useFavorites'
 import {
   PROVIDER_PRESETS,
   PREVIEW_MODELS,
   type ModelProvider,
 } from '@/types/providers'
-
-function useFavorites() {
-  const queryClient = useQueryClient()
-
-  const { data: settings } = useQuery({
-    queryKey: ['settings'],
-    queryFn: api.getSettings,
-  })
-
-  const favorites = settings?.favorite_models ?? []
-
-  const toggleMutation = useMutation({
-    mutationFn: api.toggleFavorite,
-    meta: { errorMessage: 'Failed to update favorite' },
-    onMutate: async (modelId: string) => {
-      await queryClient.cancelQueries({ queryKey: ['settings'] })
-      const prev = queryClient.getQueryData<typeof settings>(['settings'])
-      if (prev) {
-        const favs = prev.favorite_models || []
-        const idx = favs.indexOf(modelId)
-        const updated = idx >= 0 ? favs.filter((id) => id !== modelId) : [...favs, modelId]
-        queryClient.setQueryData(['settings'], { ...prev, favorite_models: updated })
-      }
-      return { prev }
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.prev) queryClient.setQueryData(['settings'], context.prev)
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
-    },
-  })
-
-  const isFavorited = (modelId: string) => favorites.includes(modelId)
-  const toggle = (modelId: string) => toggleMutation.mutate(modelId)
-
-  return { favorites, isFavorited, toggle }
-}
 
 type SelectedView = 'curated' | 'civitai' | 'favorites' | ModelProvider
 type CategoryFilter = 'all' | 'fast' | 'quality' | 'specialized'

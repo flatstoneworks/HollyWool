@@ -13,44 +13,7 @@ import {
   type CivitaiModelVersion,
 } from '@/api/client'
 import { cn } from '@/lib/utils'
-
-function useCivitaiFavorite(versionId: number | undefined) {
-  const queryClient = useQueryClient()
-  const favId = versionId != null ? `civitai:${versionId}` : undefined
-
-  const { data: settings } = useQuery({
-    queryKey: ['settings'],
-    queryFn: api.getSettings,
-  })
-
-  const isFavorited = favId ? (settings?.favorite_models?.includes(favId) ?? false) : false
-
-  const toggleMutation = useMutation({
-    mutationFn: api.toggleFavorite,
-    meta: { errorMessage: 'Failed to update favorite' },
-    onMutate: async (id: string) => {
-      await queryClient.cancelQueries({ queryKey: ['settings'] })
-      const prev = queryClient.getQueryData<typeof settings>(['settings'])
-      if (prev) {
-        const favs = prev.favorite_models || []
-        const idx = favs.indexOf(id)
-        const updated = idx >= 0 ? favs.filter((f) => f !== id) : [...favs, id]
-        queryClient.setQueryData(['settings'], { ...prev, favorite_models: updated })
-      }
-      return { prev }
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.prev) queryClient.setQueryData(['settings'], context.prev)
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
-    },
-  })
-
-  const toggle = () => { if (favId) toggleMutation.mutate(favId) }
-
-  return { isFavorited, toggle }
-}
+import { useFavorite } from '@/hooks/useFavorites'
 
 function formatCount(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
@@ -100,7 +63,8 @@ export function CivitaiModelDetailPage() {
 
   // We pass undefined initially; we'll get the real version ID once model loads
   const [firstVersionId, setFirstVersionId] = useState<number | undefined>(undefined)
-  const { isFavorited, toggle: toggleFavorite } = useCivitaiFavorite(firstVersionId)
+  const civitaiFavId = firstVersionId != null ? `civitai:${firstVersionId}` : undefined
+  const { isFavorited, toggle: toggleFavorite } = useFavorite(civitaiFavId)
 
   const { data: model, isLoading, isError } = useQuery({
     queryKey: ['civitai-model', numericId],

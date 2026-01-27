@@ -1,18 +1,24 @@
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, Loader2, Download, Copy, Trash2 } from 'lucide-react'
-import { api } from '@/api/client'
+import { api, type Asset, type VideoAsset } from '@/api/client'
 import { toast } from '@/hooks/use-toast'
 
-export function AssetDetailPage() {
+type AssetType = 'image' | 'video'
+
+function AssetDetail({ type }: { type: AssetType }) {
   const { assetId } = useParams<{ assetId: string }>()
   const navigate = useNavigate()
+  const isVideo = type === 'video'
 
   const { data: asset, isLoading } = useQuery({
-    queryKey: ['asset', assetId],
-    queryFn: () => api.getAsset(assetId!),
+    queryKey: [isVideo ? 'video-asset' : 'asset', assetId],
+    queryFn: () => isVideo ? api.getVideoAsset(assetId!) : api.getAsset(assetId!) as Promise<Asset | VideoAsset>,
     enabled: !!assetId,
   })
+
+  // Type-narrow for video-specific fields
+  const videoAsset = isVideo ? (asset as VideoAsset | undefined) : undefined
 
   if (isLoading) {
     return (
@@ -25,7 +31,7 @@ export function AssetDetailPage() {
   if (!asset) {
     return (
       <div className="h-screen flex items-center justify-center bg-black text-white">
-        <p>Asset not found</p>
+        <p>{isVideo ? 'Video asset' : 'Asset'} not found</p>
       </div>
     )
   }
@@ -36,11 +42,29 @@ export function AssetDetailPage() {
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `${asset.prompt.slice(0, 30).replace(/[^a-z0-9]/gi, '_')}_${asset.seed}.png`
+    const ext = isVideo ? 'mp4' : 'png'
+    a.download = `${asset.prompt.slice(0, 30).replace(/[^a-z0-9]/gi, '_')}_${asset.seed}.${ext}`
     document.body.appendChild(a)
     a.click()
     window.URL.revokeObjectURL(url)
     document.body.removeChild(a)
+  }
+
+  const handleDelete = async () => {
+    const label = isVideo ? 'video' : 'image'
+    if (confirm(`Delete this ${label}?`)) {
+      try {
+        if (isVideo) {
+          await api.deleteVideoAsset(asset.id)
+        } else {
+          await api.deleteAsset(asset.id)
+        }
+        toast({ title: `${isVideo ? 'Video' : 'Image'} deleted`, variant: 'success' })
+        navigate(-1)
+      } catch (err) {
+        toast({ title: 'Delete failed', description: (err as Error).message, variant: 'destructive' })
+      }
+    }
   }
 
   return (
@@ -53,13 +77,22 @@ export function AssetDetailPage() {
         <ArrowLeft className="h-6 w-6 text-white" />
       </button>
 
-      {/* Main image area */}
+      {/* Main media area */}
       <div className="flex-1 flex flex-col items-center justify-center p-8">
-        <img
-          src={asset.url}
-          alt={asset.prompt}
-          className="max-w-full max-h-[80vh] object-contain rounded-xl"
-        />
+        {isVideo ? (
+          <video
+            src={asset.url}
+            controls
+            autoPlay
+            className="max-w-full max-h-[80vh] rounded-xl"
+          />
+        ) : (
+          <img
+            src={asset.url}
+            alt={asset.prompt}
+            className="max-w-full max-h-[80vh] object-contain rounded-xl"
+          />
+        )}
         <div className="mt-4 flex items-center gap-2">
           <button
             onClick={handleDownload}
@@ -76,17 +109,7 @@ export function AssetDetailPage() {
             <Copy className="h-5 w-5 text-white" />
           </button>
           <button
-            onClick={async () => {
-              if (confirm('Delete this image?')) {
-                try {
-                  await api.deleteAsset(asset.id)
-                  toast({ title: 'Image deleted', variant: 'success' })
-                  navigate(-1)
-                } catch (err) {
-                  toast({ title: 'Delete failed', description: (err as Error).message, variant: 'destructive' })
-                }
-              }
-            }}
+            onClick={handleDelete}
             className="p-2 rounded-lg bg-white/10 hover:bg-red-500/50 transition-colors"
             title="Delete"
           >
@@ -101,7 +124,7 @@ export function AssetDetailPage() {
           <h3 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Prompt</h3>
           <p className="text-sm text-white/80 leading-relaxed">{asset.prompt}</p>
         </div>
-        {asset.negative_prompt && (
+        {'negative_prompt' in asset && asset.negative_prompt && (
           <div className="mb-6">
             <h3 className="text-xs font-medium text-white/40 uppercase tracking-wider mb-2">Negative Prompt</h3>
             <p className="text-sm text-white/60">{asset.negative_prompt}</p>
@@ -118,13 +141,31 @@ export function AssetDetailPage() {
               <span className="text-xs text-white/40">Size</span>
               <p className="text-sm text-white/80">{asset.width} x {asset.height}</p>
             </div>
+            {videoAsset && (
+              <>
+                <div>
+                  <span className="text-xs text-white/40">Duration</span>
+                  <p className="text-sm text-white/80">{videoAsset.duration.toFixed(1)}s</p>
+                </div>
+                <div>
+                  <span className="text-xs text-white/40">FPS</span>
+                  <p className="text-sm text-white/80">{videoAsset.fps}</p>
+                </div>
+                <div>
+                  <span className="text-xs text-white/40">Frames</span>
+                  <p className="text-sm text-white/80">{videoAsset.num_frames}</p>
+                </div>
+              </>
+            )}
+            {!isVideo && (
+              <div>
+                <span className="text-xs text-white/40">Guidance</span>
+                <p className="text-sm text-white/80">{(asset as Asset).guidance_scale}</p>
+              </div>
+            )}
             <div>
               <span className="text-xs text-white/40">Steps</span>
               <p className="text-sm text-white/80">{asset.steps}</p>
-            </div>
-            <div>
-              <span className="text-xs text-white/40">Guidance</span>
-              <p className="text-sm text-white/80">{asset.guidance_scale}</p>
             </div>
           </div>
           <div>
@@ -139,4 +180,12 @@ export function AssetDetailPage() {
       </div>
     </div>
   )
+}
+
+export function AssetDetailPage() {
+  return <AssetDetail type="image" />
+}
+
+export function VideoAssetDetailPage() {
+  return <AssetDetail type="video" />
 }

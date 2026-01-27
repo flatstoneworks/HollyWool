@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
   ArrowLeft, Film, ImageIcon, Loader2, CheckCircle2, XCircle,
   Clock, Cpu, HardDrive, Monitor, Download, Play, AlertCircle,
   RefreshCw, Timer
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { api, Job, VideoJob, SystemResourceStatus } from '@/api/client'
+import { api, Job, VideoJob } from '@/api/client'
 
 type JobType = 'image' | 'video'
 
@@ -85,11 +86,8 @@ export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>()
   const navigate = useNavigate()
 
-  const [job, setJob] = useState<Job | VideoJob | null>(null)
+  // Track which type of job this is (resolved on first successful fetch)
   const [jobType, setJobType] = useState<JobType | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [systemStatus, setSystemStatus] = useState<SystemResourceStatus | null>(null)
 
   // Track step timings (persisted in ref to survive re-renders)
   const stepTimingsRef = useRef<Record<string, StepTiming>>({})
@@ -102,83 +100,73 @@ export function JobDetailPage() {
     return () => clearInterval(interval)
   }, [])
 
-  // Fetch job data
-  useEffect(() => {
-    if (!jobId) return
+  // Fetch job data -- try video first, then image
+  const { data: jobData, isLoading: loading, error: jobError } = useQuery({
+    queryKey: ['job-detail', jobId, jobType],
+    queryFn: async () => {
+      if (!jobId) throw new Error('No job ID')
 
-    const fetchJob = async () => {
-      try {
-        // Try video job first (more likely from notifications)
-        try {
-          const videoJob = await api.getVideoJob(jobId)
-          setJob(videoJob)
-          setJobType('video')
-          setLoading(false)
-          return
-        } catch {
-          // Not a video job, try image job
-        }
-
-        try {
-          const imageJob = await api.getJob(jobId)
-          setJob(imageJob)
-          setJobType('image')
-          setLoading(false)
-          return
-        } catch {
-          // Not found
-        }
-
-        setError('Job not found')
-        setLoading(false)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Failed to load job')
-        setLoading(false)
+      // If we already know the type, fetch directly
+      if (jobType === 'video') {
+        const videoJob = await api.getVideoJob(jobId)
+        return { job: videoJob as Job | VideoJob, type: 'video' as JobType }
       }
-    }
-
-    fetchJob()
-  }, [jobId])
-
-  // Poll for updates if job is active
-  useEffect(() => {
-    if (!job || !jobId || ['completed', 'failed'].includes(job.status)) return
-
-    const pollJob = async () => {
-      try {
-        if (jobType === 'video') {
-          const updated = await api.getVideoJob(jobId)
-          setJob(updated)
-        } else {
-          const updated = await api.getJob(jobId)
-          setJob(updated)
-        }
-      } catch (err) {
-        console.error('Failed to poll job:', err)
+      if (jobType === 'image') {
+        const imageJob = await api.getJob(jobId)
+        return { job: imageJob as Job | VideoJob, type: 'image' as JobType }
       }
-    }
 
-    const interval = setInterval(pollJob, 1000)
-    return () => clearInterval(interval)
-  }, [job, jobId, jobType])
+      // First fetch: try video first, then image
+      try {
+        const videoJob = await api.getVideoJob(jobId)
+        return { job: videoJob as Job | VideoJob, type: 'video' as JobType }
+      } catch {
+        // Not a video job, try image
+      }
+
+      try {
+        const imageJob = await api.getJob(jobId)
+        return { job: imageJob as Job | VideoJob, type: 'image' as JobType }
+      } catch {
+        // Not found
+      }
+
+      throw new Error('Job not found')
+    },
+    enabled: !!jobId,
+    refetchInterval: (query) => {
+      const data = query.state.data
+      if (!data) return false
+      // Stop polling when job is completed or failed
+      if (['completed', 'failed'].includes(data.job.status)) return false
+      return 1000
+    },
+    staleTime: 0,
+  })
+
+  // Persist the resolved job type so subsequent fetches go directly to the right endpoint
+  useEffect(() => {
+    if (jobData && !jobType) {
+      setJobType(jobData.type)
+    }
+  }, [jobData, jobType])
+
+  const job = jobData?.job ?? null
+  const error = jobError ? (jobError instanceof Error ? jobError.message : 'Failed to load job') : null
 
   // Fetch system status while job is active
-  useEffect(() => {
-    if (!job || ['completed', 'failed'].includes(job.status)) return
-
-    const fetchStatus = async () => {
-      try {
-        const status = await api.getSystemStatus()
-        setSystemStatus(status)
-      } catch (err) {
-        console.error('Failed to fetch system status:', err)
-      }
-    }
-
-    fetchStatus()
-    const interval = setInterval(fetchStatus, 2000)
-    return () => clearInterval(interval)
-  }, [job?.status])
+  const isJobActive = job ? !['completed', 'failed'].includes(job.status) : false
+  const { data: systemStatus = null } = useQuery({
+    queryKey: ['job-system-status', jobId],
+    queryFn: () => api.getSystemStatus(),
+    enabled: isJobActive,
+    refetchInterval: (query) => {
+      // Only poll while enabled (job is active)
+      if (!query.state.data && !isJobActive) return false
+      return isJobActive ? 2000 : false
+    },
+    staleTime: 0,
+  })
 
   // Track step transitions and timings
   useEffect(() => {

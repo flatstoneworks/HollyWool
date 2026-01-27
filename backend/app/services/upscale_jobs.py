@@ -6,14 +6,13 @@ Handles queuing, processing, and tracking of video upscale jobs.
 
 import json
 import uuid
-import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict
-from queue import Queue
+from typing import Optional
 
 from ..models.schemas import UpscaleJob, VideoResult, JobStatus, VideoUpscaleRequest
 from .upscaler import get_upscaler_service
+from .base_job_manager import BaseJobManager
 
 
 # Estimated time per frame for upscaling (seconds)
@@ -27,65 +26,12 @@ UPSCALE_TIME_PER_FRAME = {
 MODEL_LOAD_TIME = 15  # Upscale models are small, load quickly
 
 
-class UpscaleJobManager:
+class UpscaleJobManager(BaseJobManager[UpscaleJob]):
     """Manages video upscale jobs with queue and background processing."""
 
-    def __init__(self):
-        self.jobs: Dict[str, UpscaleJob] = {}
-        self.job_queue: Queue = Queue()
-        self.current_job_id: Optional[str] = None
-        self.lock = threading.Lock()
-        self._load_jobs()
-
-        # Start worker thread
-        self.worker_thread = threading.Thread(target=self._worker, daemon=True)
-        self.worker_thread.start()
-
-    def _get_jobs_file(self) -> Path:
-        """Get path to jobs persistence file."""
-        data_dir = Path(__file__).parent.parent.parent.parent / "data"
-        data_dir.mkdir(parents=True, exist_ok=True)
-        return data_dir / "upscale_jobs.json"
-
-    def _load_jobs(self) -> None:
-        """Load jobs from file on startup."""
-        jobs_file = self._get_jobs_file()
-        if jobs_file.exists():
-            try:
-                with open(jobs_file, "r") as f:
-                    data = json.load(f)
-                    for job_data in data.get("jobs", []):
-                        # Convert datetime strings
-                        for dt_field in ["created_at", "started_at", "completed_at"]:
-                            if job_data.get(dt_field):
-                                job_data[dt_field] = datetime.fromisoformat(job_data[dt_field])
-                        job = UpscaleJob(**job_data)
-                        # Only keep recent jobs (last 24 hours) or incomplete ones
-                        if job.status not in [JobStatus.COMPLETED, JobStatus.FAILED]:
-                            # Re-queue incomplete jobs
-                            job.status = JobStatus.QUEUED
-                            self.jobs[job.id] = job
-                            self.job_queue.put(job.id)
-                        elif job.created_at and (datetime.utcnow() - job.created_at).total_seconds() < 86400:
-                            self.jobs[job.id] = job
-            except Exception as e:
-                print(f"Failed to load upscale jobs: {e}")
-
-    def _save_jobs(self) -> None:
-        """Save jobs to file."""
-        jobs_file = self._get_jobs_file()
-        jobs_data = []
-        with self.lock:
-            for job in self.jobs.values():
-                job_dict = job.model_dump()
-                # Convert datetime to ISO format
-                for dt_field in ["created_at", "started_at", "completed_at"]:
-                    if job_dict.get(dt_field):
-                        job_dict[dt_field] = job_dict[dt_field].isoformat()
-                jobs_data.append(job_dict)
-
-        with open(jobs_file, "w") as f:
-            json.dump({"jobs": jobs_data}, f, indent=2)
+    _jobs_filename = "upscale_jobs.json"
+    _job_type = UpscaleJob
+    _worker_name = "Upscale worker"
 
     def _estimate_time(self, model: str, num_frames: int, include_model_load: bool = False) -> float:
         """Estimate upscale time in seconds."""
@@ -161,53 +107,10 @@ class UpscaleJobManager:
 
         return job
 
-    def get_job(self, job_id: str) -> Optional[UpscaleJob]:
-        """Get an upscale job by ID."""
-        with self.lock:
-            return self.jobs.get(job_id)
-
-    def get_jobs_by_session(self, session_id: str) -> list[UpscaleJob]:
-        """Get all upscale jobs for a session."""
-        with self.lock:
-            return [j for j in self.jobs.values() if j.session_id == session_id]
-
-    def get_active_jobs(self) -> list[UpscaleJob]:
-        """Get all active (non-completed) upscale jobs."""
-        with self.lock:
-            return [j for j in self.jobs.values()
-                    if j.status not in [JobStatus.COMPLETED, JobStatus.FAILED]]
-
     def get_all_jobs(self) -> list[UpscaleJob]:
         """Get all upscale jobs."""
         with self.lock:
             return list(self.jobs.values())
-
-    def _update_job(self, job_id: str, **updates) -> None:
-        """Update upscale job fields."""
-        with self.lock:
-            if job_id in self.jobs:
-                job = self.jobs[job_id]
-                for key, value in updates.items():
-                    setattr(job, key, value)
-        self._save_jobs()
-
-    def _worker(self) -> None:
-        """Background worker that processes upscale jobs."""
-        while True:
-            try:
-                job_id = self.job_queue.get()
-                self.current_job_id = job_id
-                self._process_job(job_id)
-                self.current_job_id = None
-            except Exception as e:
-                print(f"Upscale worker error: {e}")
-                import traceback
-                traceback.print_exc()
-                if self.current_job_id:
-                    self._update_job(self.current_job_id,
-                                    status=JobStatus.FAILED,
-                                    error=str(e))
-                self.current_job_id = None
 
     def _process_job(self, job_id: str) -> None:
         """Process a single upscale job."""

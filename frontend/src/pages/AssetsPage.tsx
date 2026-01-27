@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { useUrlState } from '@/hooks/useUrlState'
@@ -10,12 +10,10 @@ import {
 import { api, type Asset, type VideoAsset } from '@/api/client'
 import { Card } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+import { useResizableSidebar } from '@/hooks/useResizableSidebar'
+import { handleDownload as downloadFile } from '@/lib/download'
 
 type MediaType = 'all' | 'images' | 'videos'
-
-const MIN_SIDEBAR_WIDTH = 200
-const MAX_SIDEBAR_WIDTH = 350
-const DEFAULT_SIDEBAR_WIDTH = 256
 
 export function AssetsPage() {
   const queryClient = useQueryClient()
@@ -27,8 +25,7 @@ export function AssetsPage() {
   const [showAllModels, setShowAllModels] = useState(false)
 
   // Resizable sidebar
-  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
-  const [isResizing, setIsResizing] = useState(false)
+  const { sidebarWidth, isResizing, handleResizeStart } = useResizableSidebar({ maxWidth: 350 })
   const sidebarRef = useRef<HTMLDivElement>(null)
 
   // Fetch image assets
@@ -68,55 +65,14 @@ export function AssetsPage() {
     meta: { successMessage: 'Upscale started', errorMessage: 'Upscale failed' },
   })
 
-  // Handle sidebar resize
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    setIsResizing(true)
-  }, [])
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return
-      const navWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nav-sidebar-width')) || 56
-      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX - navWidth))
-      setSidebarWidth(newWidth)
-    }
-
-    const handleMouseUp = () => {
-      setIsResizing(false)
-    }
-
-    if (isResizing) {
-      document.addEventListener('mousemove', handleMouseMove)
-      document.addEventListener('mouseup', handleMouseUp)
-      document.body.style.cursor = 'col-resize'
-      document.body.style.userSelect = 'none'
-    }
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-  }, [isResizing])
-
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text)
   }
 
   const handleDownload = async (asset: Asset | VideoAsset, isVideo: boolean) => {
-    const response = await fetch(asset.url)
-    const blob = await response.blob()
-    const url = window.URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
     const ext = isVideo ? 'mp4' : 'png'
-    a.download = `${asset.prompt.slice(0, 30).replace(/[^a-z0-9]/gi, '_')}_${asset.seed}.${ext}`
-    document.body.appendChild(a)
-    a.click()
-    window.URL.revokeObjectURL(url)
-    document.body.removeChild(a)
+    const filename = `${asset.prompt.slice(0, 30).replace(/[^a-z0-9]/gi, '_')}_${asset.seed}.${ext}`
+    await downloadFile(asset.url, filename)
   }
 
   // Compute model counts and filtered assets for images
@@ -457,7 +413,7 @@ export function AssetsPage() {
 
         {/* Resize handle */}
         <div
-          onMouseDown={handleMouseDown}
+          onMouseDown={handleResizeStart}
           className={cn(
             'absolute right-0 top-0 bottom-0 w-1 cursor-col-resize group',
             'hover:bg-primary/50 transition-colors',

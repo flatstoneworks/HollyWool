@@ -7,43 +7,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/api/client'
 import { cn } from '@/lib/utils'
-
-function useFavorite(modelId: string | undefined) {
-  const queryClient = useQueryClient()
-
-  const { data: settings } = useQuery({
-    queryKey: ['settings'],
-    queryFn: api.getSettings,
-  })
-
-  const isFavorited = settings?.favorite_models?.includes(modelId ?? '') ?? false
-
-  const toggleMutation = useMutation({
-    mutationFn: api.toggleFavorite,
-    meta: { errorMessage: 'Failed to update favorite' },
-    onMutate: async (id: string) => {
-      await queryClient.cancelQueries({ queryKey: ['settings'] })
-      const prev = queryClient.getQueryData<typeof settings>(['settings'])
-      if (prev) {
-        const favs = prev.favorite_models || []
-        const idx = favs.indexOf(id)
-        const updated = idx >= 0 ? favs.filter((f) => f !== id) : [...favs, id]
-        queryClient.setQueryData(['settings'], { ...prev, favorite_models: updated })
-      }
-      return { prev }
-    },
-    onError: (_err, _vars, context) => {
-      if (context?.prev) queryClient.setQueryData(['settings'], context.prev)
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['settings'] })
-    },
-  })
-
-  const toggle = () => { if (modelId) toggleMutation.mutate(modelId) }
-
-  return { isFavorited, toggle }
-}
+import { useFavorite } from '@/hooks/useFavorites'
 
 function formatBytes(mb: number): string {
   if (mb >= 1024) {

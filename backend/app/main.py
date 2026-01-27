@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .routers import generate, assets, providers, settings, civitai
+from .routers import generate, assets, providers, settings, civitai, video, i2v, upscale, system
 
 
 def load_config() -> dict:
@@ -19,7 +19,7 @@ config = load_config()
 app = FastAPI(
     title="HollyWool",
     description="Local AI image generation API",
-    version="0.1.0",
+    version="1.0.0",
 )
 
 # CORS configuration
@@ -42,13 +42,17 @@ app.include_router(assets.router)
 app.include_router(providers.router)
 app.include_router(settings.router)
 app.include_router(civitai.router)
+app.include_router(video.router)
+app.include_router(i2v.router)
+app.include_router(upscale.router)
+app.include_router(system.router)
 
 
 @app.get("/")
 async def root():
     return {
         "name": "HollyWool",
-        "version": "0.1.0",
+        "version": "1.0.0",
         "description": "Local AI image generation",
     }
 

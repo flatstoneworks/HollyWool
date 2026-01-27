@@ -1,13 +1,16 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   Sparkles, ChevronDown, Palette, X, Wand2,
-  Plus, MessageSquare, MoreHorizontal, Pencil, GripVertical, Trash2, Square, Monitor,
+  Plus, Square, Monitor,
   AlertCircle, Loader2, Download, Volume2, Upload, Image as ImageIcon
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
+import { useResizableSidebar } from '@/hooks/useResizableSidebar'
+import { SessionSidebar } from '@/components/SessionSidebar'
+import { fileToBase64 } from '@/lib/file-utils'
 import {
   getVideoSessions, createVideoSession, setCurrentVideoSessionId, getCurrentVideoSessionId,
   deleteVideoSession, renameVideoSession, ensureCurrentVideoSession, updateVideoSession,
@@ -102,10 +105,6 @@ const stylePresets = [
   { id: 'realistic', label: 'Realistic', prefix: 'photorealistic, 4k footage, ' },
 ]
 
-const MIN_SIDEBAR_WIDTH = 200
-const MAX_SIDEBAR_WIDTH = 400
-const DEFAULT_SIDEBAR_WIDTH = 256
-
 export function VideoPage() {
   const [searchParams, setSearchParams] = useSearchParams()
 
@@ -139,14 +138,9 @@ export function VideoPage() {
   // Session management (video sessions are separate from image sessions)
   const [sessions, setSessions] = useState<VideoSession[]>([])
   const [currentSession, setCurrentSession] = useState<VideoSession | null>(null)
-  const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
-  const [editingName, setEditingName] = useState('')
-  const [sessionMenuId, setSessionMenuId] = useState<string | null>(null)
 
   // Resizable sidebar
-  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SIDEBAR_WIDTH)
-  const [isResizing, setIsResizing] = useState(false)
-  const sidebarRef = useRef<HTMLDivElement>(null)
+  const { sidebarWidth, isResizing, handleResizeStart } = useResizableSidebar()
 
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -440,39 +434,6 @@ export function VideoPage() {
     job => job && job.session_id === currentSession?.id && !['completed', 'failed'].includes(job.status)
   )
 
-  // Handle sidebar resize
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault()
-    setIsResizing(true)
-  }, [])
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return
-      const navWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--nav-sidebar-width')) || 56
-      const newWidth = Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, e.clientX - navWidth))
-      setSidebarWidth(newWidth)
-    }
-
-    const handleMouseUp = () => {
-      setIsResizing(false)
-    }
-
-    if (isResizing) {
-      document.addEventListener('mousemove', handleMouseMove)
-      document.addEventListener('mouseup', handleMouseUp)
-      document.body.style.cursor = 'col-resize'
-      document.body.style.userSelect = 'none'
-    }
-
-    return () => {
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.body.style.cursor = ''
-      document.body.style.userSelect = ''
-    }
-  }, [isResizing])
-
   const selectedStyleInfo = stylePresets.find(s => s.id === selectedStyle)!
   const selectedModelInfo = videoModels.find(m => m.id === selectedModel)!
 
@@ -516,16 +477,6 @@ export function VideoPage() {
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
     }
-  }
-
-  // Helper: file to base64
-  const fileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onloadend = () => resolve(reader.result as string)
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    })
   }
 
   const handleGenerate = async () => {
@@ -605,7 +556,9 @@ export function VideoPage() {
     })
   }
 
-  const handleSwitchSession = (session: VideoSession) => {
+  const handleSwitchSession = (sessionId: string) => {
+    const session = sessions.find(s => s.id === sessionId)
+    if (!session) return
     setCurrentVideoSessionId(session.id)
     setCurrentSession(session)
     // Push session to URL (creates history entry)
@@ -624,134 +577,49 @@ export function VideoPage() {
       const newSession = getVideoSessions().find(s => s.id === newCurrentId)
       setCurrentSession(newSession || null)
     }
-    setSessionMenuId(null)
   }
 
-  const handleRenameSession = (id: string) => {
-    if (editingName.trim()) {
-      renameVideoSession(id, editingName.trim())
-      setSessions(getVideoSessions())
-      setCurrentSession(getVideoSessions().find(s => s.id === currentSession?.id) || null)
-    }
-    setEditingSessionId(null)
-    setEditingName('')
+  const handleRenameSession = (id: string, name: string) => {
+    renameVideoSession(id, name)
+    setSessions(getVideoSessions())
+    setCurrentSession(getVideoSessions().find(s => s.id === currentSession?.id) || null)
   }
 
   return (
     <div className="flex-1 flex h-full overflow-hidden">
       {/* Session Sidebar */}
-      <aside
-        ref={sidebarRef}
-        style={{ width: sidebarWidth }}
-        className="h-full border-r border-border flex flex-col bg-muted/50 dark:bg-black/20 relative flex-shrink-0"
-      >
-        <div className="p-3 border-b border-border flex-shrink-0">
-          <button
-            onClick={handleNewSession}
-            className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-foreground text-sm font-medium transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            New Session
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto scrollbar-thin p-2 space-y-1 min-h-0">
-          {sessions.map((session) => (
-            <div
-              key={session.id}
-              className={cn(
-                'group relative rounded-lg transition-colors cursor-pointer',
-                currentSession?.id === session.id
-                  ? 'bg-accent'
-                  : 'hover:bg-muted'
-              )}
-            >
-              {editingSessionId === session.id ? (
-                <input
-                  type="text"
-                  value={editingName}
-                  onChange={(e) => setEditingName(e.target.value)}
-                  onBlur={() => handleRenameSession(session.id)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleRenameSession(session.id)}
-                  className="w-full px-3 py-2 bg-transparent text-sm text-foreground outline-none"
-                  autoFocus
-                />
-              ) : (
-                <div
-                  onClick={() => handleSwitchSession(session)}
-                  className="flex items-center gap-2 px-2 py-2"
-                >
-                  {session.thumbnail ? (
-                    <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0 bg-muted">
-                      {session.thumbnail.endsWith('.mp4') ? (
-                        <video src={session.thumbnail} className="w-full h-full object-cover" muted />
-                      ) : (
-                        <img src={session.thumbnail} alt="" className="w-full h-full object-cover" />
-                      )}
-                    </div>
-                  ) : (
-                    <div className="w-8 h-8 rounded flex-shrink-0 bg-muted flex items-center justify-center">
-                      <MessageSquare className="h-4 w-4 text-muted-foreground/50" />
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm text-foreground/80 truncate block">{session.name}</span>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setSessionMenuId(sessionMenuId === session.id ? null : session.id)
-                    }}
-                    className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-all"
-                  >
-                    <MoreHorizontal className="h-4 w-4 text-muted-foreground/70" />
-                  </button>
-                </div>
-              )}
-
-              {sessionMenuId === session.id && (
-                <>
-                  <div className="fixed inset-0 z-50" onClick={() => setSessionMenuId(null)} />
-                  <div className="absolute right-0 top-full mt-1 w-36 py-1 rounded-lg bg-[#1a1a1a] border border-white/10 shadow-xl z-[60]">
-                    <button
-                      onClick={() => {
-                        setEditingSessionId(session.id)
-                        setEditingName(session.name)
-                        setSessionMenuId(null)
-                      }}
-                      className="w-full px-3 py-1.5 text-left text-sm text-foreground/80 hover:bg-accent flex items-center gap-2"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                      Rename
-                    </button>
-                    <button
-                      onClick={() => handleDeleteSession(session.id)}
-                      className="w-full px-3 py-1.5 text-left text-sm text-red-400 hover:bg-accent flex items-center gap-2"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete
-                    </button>
-                  </div>
-                </>
-              )}
+      <SessionSidebar
+        sessions={sessions}
+        currentSessionId={currentSession?.id ?? null}
+        onNewSession={handleNewSession}
+        onSwitchSession={handleSwitchSession}
+        onDeleteSession={handleDeleteSession}
+        onRenameSession={handleRenameSession}
+        sidebarWidth={sidebarWidth}
+        isResizing={isResizing}
+        onResizeStart={handleResizeStart}
+        newSessionButtonClass="text-foreground"
+        renderSessionContent={(session) => (
+          <>
+            {session.thumbnail ? (
+              <div className="w-8 h-8 rounded overflow-hidden flex-shrink-0 bg-muted">
+                {session.thumbnail.endsWith('.mp4') ? (
+                  <video src={session.thumbnail} className="w-full h-full object-cover" muted />
+                ) : (
+                  <img src={session.thumbnail} alt="" className="w-full h-full object-cover" />
+                )}
+              </div>
+            ) : (
+              <div className="w-8 h-8 rounded flex-shrink-0 bg-muted flex items-center justify-center">
+                <ImageIcon className="h-4 w-4 text-muted-foreground/50" />
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <span className="text-sm text-foreground/80 truncate block">{session.name}</span>
             </div>
-          ))}
-        </div>
-
-        {/* Resize handle */}
-        <div
-          onMouseDown={handleMouseDown}
-          className={cn(
-            'absolute right-0 top-0 bottom-0 w-1 cursor-col-resize group',
-            'hover:bg-primary/50 transition-colors',
-            isResizing && 'bg-primary/50'
-          )}
-        >
-          <div className="absolute right-0 top-1/2 -translate-y-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <GripVertical className="h-6 w-6 text-muted-foreground/50" />
-          </div>
-        </div>
-      </aside>
+          </>
+        )}
+      />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col relative min-w-0 h-full">

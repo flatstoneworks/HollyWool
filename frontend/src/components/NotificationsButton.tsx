@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
   Bell, ImageIcon, Film, Loader2, X, ChevronRight,
   CheckCircle2, XCircle, Clock
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { api } from '@/api/client'
+import { api, Job, VideoJob } from '@/api/client'
 
 interface Activity {
   id: string
@@ -18,6 +19,21 @@ interface Activity {
   completedAt?: number | null
   createdAt?: number
   error?: string | null
+}
+
+function jobToActivity(job: Job | VideoJob, type: 'image' | 'video'): Activity {
+  return {
+    id: job.id,
+    type,
+    sessionId: job.session_id,
+    prompt: job.prompt,
+    status: job.status,
+    progress: job.progress,
+    model: job.model,
+    completedAt: job.completed_at ? new Date(job.completed_at).getTime() / 1000 : null,
+    createdAt: job.created_at ? new Date(job.created_at).getTime() / 1000 : undefined,
+    error: job.error,
+  }
 }
 
 function formatTimeAgo(timestamp: number | null | undefined): string {
@@ -34,80 +50,57 @@ function formatTimeAgo(timestamp: number | null | undefined): string {
 export function NotificationsButton() {
   const navigate = useNavigate()
   const [isOpen, setIsOpen] = useState(false)
-  const [activeActivities, setActiveActivities] = useState<Activity[]>([])
-  const [doneActivities, setDoneActivities] = useState<Activity[]>([])
 
-  // Poll for jobs
-  useEffect(() => {
-    const fetchJobs = async () => {
-      try {
-        const [imageJobs, videoJobs] = await Promise.all([
-          api.getJobs(),
-          api.getVideoJobs(),
-        ])
+  // Poll for image jobs
+  const { data: imageJobsData } = useQuery({
+    queryKey: ['notifications-image-jobs'],
+    queryFn: () => api.getJobs(),
+    refetchInterval: 2000,
+    staleTime: 0,
+  })
 
-        const active: Activity[] = []
-        const done: Activity[] = []
+  // Poll for video jobs
+  const { data: videoJobsData } = useQuery({
+    queryKey: ['notifications-video-jobs'],
+    queryFn: () => api.getVideoJobs(),
+    refetchInterval: 2000,
+    staleTime: 0,
+  })
 
-        // Process image jobs
-        for (const job of imageJobs.jobs) {
-          const activity: Activity = {
-            id: job.id,
-            type: 'image',
-            sessionId: job.session_id,
-            prompt: job.prompt,
-            status: job.status,
-            progress: job.progress,
-            model: job.model,
-            completedAt: job.completed_at ? new Date(job.completed_at).getTime() / 1000 : null,
-            createdAt: job.created_at ? new Date(job.created_at).getTime() / 1000 : undefined,
-            error: job.error,
-          }
+  // Derive active and done activities from query data
+  const { activeActivities, doneActivities } = useMemo(() => {
+    const active: Activity[] = []
+    const done: Activity[] = []
 
-          if (['completed', 'failed'].includes(job.status)) {
-            done.push(activity)
-          } else {
-            active.push(activity)
-          }
+    // Process image jobs
+    if (imageJobsData) {
+      for (const job of imageJobsData.jobs) {
+        const activity = jobToActivity(job, 'image')
+        if (['completed', 'failed'].includes(job.status)) {
+          done.push(activity)
+        } else {
+          active.push(activity)
         }
-
-        // Process video jobs
-        for (const job of videoJobs.jobs) {
-          const activity: Activity = {
-            id: job.id,
-            type: 'video',
-            sessionId: job.session_id,
-            prompt: job.prompt,
-            status: job.status,
-            progress: job.progress,
-            model: job.model,
-            completedAt: job.completed_at ? new Date(job.completed_at).getTime() / 1000 : null,
-            createdAt: job.created_at ? new Date(job.created_at).getTime() / 1000 : undefined,
-            error: job.error,
-          }
-
-          if (['completed', 'failed'].includes(job.status)) {
-            done.push(activity)
-          } else {
-            active.push(activity)
-          }
-        }
-
-        // Sort done by completion time (most recent first)
-        done.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))
-
-        // Limit done activities to last 5
-        setActiveActivities(active)
-        setDoneActivities(done.slice(0, 5))
-      } catch (err) {
-        console.error('Failed to fetch jobs:', err)
       }
     }
 
-    fetchJobs()
-    const interval = setInterval(fetchJobs, 2000)
-    return () => clearInterval(interval)
-  }, [])
+    // Process video jobs
+    if (videoJobsData) {
+      for (const job of videoJobsData.jobs) {
+        const activity = jobToActivity(job, 'video')
+        if (['completed', 'failed'].includes(job.status)) {
+          done.push(activity)
+        } else {
+          active.push(activity)
+        }
+      }
+    }
+
+    // Sort done by completion time (most recent first)
+    done.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))
+
+    return { activeActivities: active, doneActivities: done.slice(0, 5) }
+  }, [imageJobsData, videoJobsData])
 
   const handleNavigateToJob = (activity: Activity) => {
     navigate(`/job/${activity.id}`)
