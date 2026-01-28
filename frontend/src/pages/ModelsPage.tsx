@@ -29,7 +29,7 @@ type StatusFilter = 'all' | 'downloaded' | 'not-downloaded'
 
 const PROVIDER_IDS: ModelProvider[] = ['krea', 'higgsfield', 'fal']
 
-const VIDEO_MODEL_TYPES = ['video', 'ltx2', 'video-i2v', 'svd']
+const VIDEO_MODEL_TYPES = ['video', 'ltx2', 'video-i2v', 'svd', 'wan', 'wan-i2v', 'mochi']
 
 function isVideoModel(model: ModelDetailedInfo): boolean {
   return VIDEO_MODEL_TYPES.includes(model.type)
@@ -378,8 +378,8 @@ function CuratedView({
 
   // Group video models by sub-type
   const videoGroupedModels = {
-    t2v: modeFilteredModels.filter(m => ['video', 'ltx2'].includes(m.type)),
-    i2v: modeFilteredModels.filter(m => ['video-i2v', 'svd'].includes(m.type)),
+    t2v: modeFilteredModels.filter(m => ['video', 'ltx2', 'wan', 'mochi'].includes(m.type)),
+    i2v: modeFilteredModels.filter(m => ['video-i2v', 'svd', 'wan-i2v'].includes(m.type)),
   }
 
   // Group image models by existing categories

@@ -64,6 +64,8 @@ export function ImagePage() {
   const [referenceImages, setReferenceImages] = useState<{file: File, preview: string}[]>([])
   const [strength, setStrength] = useState(0.75)
   const refImageInputRef = useRef<HTMLInputElement>(null)
+  const [isDraggingOver, setIsDraggingOver] = useState(false)
+  const dragCounter = useRef(0)
 
   // Session management
   const [sessions, setSessions] = useState<Session[]>([])
@@ -428,10 +430,9 @@ export function ImagePage() {
   }
 
   // Reference image handlers
-  const handleRefImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || [])
+  const addReferenceFiles = (files: File[]) => {
     const remaining = 5 - referenceImages.length
-    const toAdd = files.slice(0, remaining)
+    const toAdd = files.filter(f => f.type.startsWith('image/')).slice(0, remaining)
 
     for (const file of toAdd) {
       const reader = new FileReader()
@@ -443,8 +444,10 @@ export function ImagePage() {
       }
       reader.readAsDataURL(file)
     }
+  }
 
-    // Reset input so same file can be re-selected
+  const handleRefImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    addReferenceFiles(Array.from(e.target.files || []))
     if (refImageInputRef.current) refImageInputRef.current.value = ''
   }
 
@@ -454,6 +457,37 @@ export function ImagePage() {
 
   const clearReferenceImages = () => {
     setReferenceImages([])
+  }
+
+  // Drag and drop handlers for reference images
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+  }
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounter.current++
+    if (e.dataTransfer.types.includes('Files')) {
+      setIsDraggingOver(true)
+    }
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounter.current--
+    if (dragCounter.current === 0) {
+      setIsDraggingOver(false)
+    }
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounter.current = 0
+    setIsDraggingOver(false)
+    const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'))
+    if (files.length > 0) {
+      addReferenceFiles(files)
+    }
   }
 
   // Count active jobs in queue (for limiting to 10)
@@ -995,7 +1029,20 @@ export function ImagePage() {
           style={{ left: `calc(var(--nav-sidebar-width, 0px) + ${sidebarWidth}px)` }}
         >
           <div className="max-w-3xl mx-auto">
-            <div className="glass rounded-2xl p-3">
+            <div
+              className={cn("glass rounded-2xl p-3", isDraggingOver && "ring-2 ring-primary")}
+              onDragOver={handleDragOver}
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {/* Drop zone indicator */}
+              {isDraggingOver && (
+                <div className="mb-3 flex items-center justify-center p-4 rounded-xl border-2 border-dashed border-primary/50 bg-primary/10">
+                  <ImageIcon className="h-4 w-4 text-primary mr-2" />
+                  <span className="text-sm text-primary font-medium">Drop image to use as reference</span>
+                </div>
+              )}
               {/* Top row - Options */}
               <div className="flex items-center gap-2 mb-3 px-1 flex-wrap">
                 {/* Model Selector */}

@@ -68,12 +68,36 @@ const videoModels: VideoModel[] = [
     supportedResolutions: ['720p'],
     supportsI2V: false,
   },
+  {
+    id: 'wan22-t2v',
+    name: 'Wan2.2 T2V',
+    description: 'High-quality MoE text-to-video, 5s at 16fps',
+    maxDuration: 5,
+    supportedResolutions: ['720p'],
+    supportsI2V: false,
+  },
+  {
+    id: 'mochi-1',
+    name: 'Mochi 1',
+    description: 'Genmo 10B video model, smooth motion at 30fps',
+    maxDuration: 3,
+    supportedResolutions: ['720p'],
+    supportsI2V: false,
+  },
   // Image-to-Video models
   {
     id: 'cogvideox-5b-i2v',
     name: 'CogVideoX-5B',
     description: 'Animate images into video clips, 6s',
     maxDuration: 6,
+    supportedResolutions: ['720p'],
+    supportsI2V: true,
+  },
+  {
+    id: 'wan22-i2v',
+    name: 'Wan2.2 I2V',
+    description: 'Animate images with Wan2.2 MoE, 5s at 16fps',
+    maxDuration: 5,
     supportedResolutions: ['720p'],
     supportsI2V: true,
   },
@@ -460,15 +484,19 @@ export function VideoPage() {
   }, [selectedModel])
 
   // Handle file upload
+  const addSourceFile = (file: File) => {
+    setSourceImage(file)
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      setSourceImagePreview(reader.result as string)
+    }
+    reader.readAsDataURL(file)
+  }
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
-      setSourceImage(file)
-      const reader = new FileReader()
-      reader.onloadend = () => {
-        setSourceImagePreview(reader.result as string)
-      }
-      reader.readAsDataURL(file)
+      addSourceFile(file)
     }
   }
 
@@ -477,6 +505,41 @@ export function VideoPage() {
     setSourceImagePreview(null)
     if (fileInputRef.current) {
       fileInputRef.current.value = ''
+    }
+  }
+
+  // Drag and drop for source images (I2V)
+  const [isDraggingOver, setIsDraggingOver] = useState(false)
+  const dragCounter = useRef(0)
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+  }
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounter.current++
+    if (e.dataTransfer.types.includes('Files') && selectedModelInfo?.supportsI2V) {
+      setIsDraggingOver(true)
+    }
+  }
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounter.current--
+    if (dragCounter.current === 0) {
+      setIsDraggingOver(false)
+    }
+  }
+
+  const handleDropImage = (e: React.DragEvent) => {
+    e.preventDefault()
+    dragCounter.current = 0
+    setIsDraggingOver(false)
+    if (!selectedModelInfo?.supportsI2V) return
+    const file = Array.from(e.dataTransfer.files).find(f => f.type.startsWith('image/'))
+    if (file) {
+      addSourceFile(file)
     }
   }
 
@@ -891,7 +954,20 @@ export function VideoPage() {
           style={{ left: `calc(var(--nav-sidebar-width, 0px) + ${sidebarWidth}px)` }}
         >
           <div className="max-w-3xl mx-auto">
-            <div className="glass rounded-2xl p-3">
+            <div
+              className={cn("glass rounded-2xl p-3", isDraggingOver && "ring-2 ring-primary")}
+              onDragOver={handleDragOver}
+              onDragEnter={handleDragEnter}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDropImage}
+            >
+              {/* Drop zone indicator */}
+              {isDraggingOver && (
+                <div className="mb-3 flex items-center justify-center p-4 rounded-xl border-2 border-dashed border-primary/50 bg-primary/10">
+                  <ImageIcon className="h-4 w-4 text-primary mr-2" />
+                  <span className="text-sm text-primary font-medium">Drop image to animate</span>
+                </div>
+              )}
               {/* Top row - Options */}
               <div className="flex items-center gap-2 mb-3 px-1 flex-wrap">
                 {/* Model Selector */}

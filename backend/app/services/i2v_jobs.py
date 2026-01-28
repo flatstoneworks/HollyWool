@@ -22,6 +22,7 @@ from .base_job_manager import BaseJobManager
 I2V_MODEL_BASE_TIMES = {
     "cogvideox-5b-i2v": 180,  # ~3 minutes per video
     "svd-xt": 90,             # ~1.5 minutes per video
+    "wan22-i2v": 240,         # ~4 min (same arch as T2V)
 }
 
 # Time to load a new model (seconds)
@@ -86,6 +87,8 @@ class I2VJobManager(BaseJobManager[I2VJob]):
                     if not asset_path.exists():
                         asset_path = output_dir / f"{ref.image_asset_id}.jpg"
                     if not asset_path.exists():
+                        asset_path = output_dir / f"{ref.image_asset_id}.webp"
+                    if not asset_path.exists():
                         raise ValueError(f"Asset not found: {ref.image_asset_id}")
                     img = Image.open(asset_path)
                 else:
@@ -113,6 +116,8 @@ class I2VJobManager(BaseJobManager[I2VJob]):
             if not asset_path.exists():
                 asset_path = output_dir / f"{request.image_asset_id}.jpg"
             if not asset_path.exists():
+                asset_path = output_dir / f"{request.image_asset_id}.webp"
+            if not asset_path.exists():
                 raise ValueError(f"Asset not found: {request.image_asset_id}")
             image = Image.open(asset_path)
             return [image], [f"/outputs/{asset_path.name}"]
@@ -129,7 +134,7 @@ class I2VJobManager(BaseJobManager[I2VJob]):
             raise ValueError(f"Unknown model: {request.model}")
 
         model_type = model_config.get("type")
-        if model_type not in ["video-i2v", "svd"]:
+        if model_type not in ["video-i2v", "svd", "wan-i2v"]:
             raise ValueError(f"Model {request.model} does not support I2V")
 
         steps = request.steps if request.steps else model_config["default_steps"]
@@ -187,6 +192,7 @@ class I2VJobManager(BaseJobManager[I2VJob]):
 
         try:
             # Get the pending images
+            self._pending_images = getattr(self, '_pending_images', {})
             images = self._pending_images.pop(job_id, None)
             if images is None:
                 # Try to reload from saved source files

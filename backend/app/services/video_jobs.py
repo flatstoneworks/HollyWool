@@ -16,6 +16,8 @@ VIDEO_MODEL_BASE_TIMES = {
     "cogvideox-2b": 90,   # ~1.5 minutes per video
     "ltx-2": 120,         # ~2 minutes per video (with audio)
     "ltx-2-fp8": 90,      # ~1.5 minutes (FP8 quantized)
+    "wan22-t2v": 240,     # ~4 min (MoE + cpu_offload overhead)
+    "mochi-1": 200,       # ~3.5 min (10B params, 64 steps)
 }
 
 # Time to load a new model (seconds)

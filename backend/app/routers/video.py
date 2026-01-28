@@ -26,7 +26,7 @@ async def create_video_job(request: VideoGenerateRequest):
     if not model_config:
         raise HTTPException(status_code=400, detail=f"Unknown model: {request.model}")
 
-    if model_config.get("type") not in ["video", "ltx2"]:
+    if model_config.get("type") not in ["video", "ltx2", "wan", "mochi"]:
         raise HTTPException(status_code=400, detail=f"Model {request.model} is not a video model")
 
     # Check system resources before accepting job

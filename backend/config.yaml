@@ -213,6 +213,34 @@ models:
     requires_approval: false
     fp8: true
 
+  wan22-t2v:
+    name: "Wan2.2 T2V"
+    path: "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
+    type: "wan"
+    default_steps: 50
+    default_guidance: 5.0
+    default_num_frames: 81
+    default_fps: 16
+    category: "video"
+    description: "High-quality text-to-video from Wan2.2 MoE architecture"
+    tags: ["video", "text-to-video", "quality"]
+    size_gb: 28
+    requires_approval: false
+
+  mochi-1:
+    name: "Mochi 1 Preview"
+    path: "genmo/mochi-1-preview"
+    type: "mochi"
+    default_steps: 64
+    default_guidance: 4.5
+    default_num_frames: 85
+    default_fps: 30
+    category: "video"
+    description: "Genmo's 10B parameter video model with smooth motion"
+    tags: ["video", "text-to-video", "quality"]
+    size_gb: 22
+    requires_approval: false
+
   # === IMAGE-TO-VIDEO MODELS ===
   cogvideox-5b-i2v:
     name: "CogVideoX-5B I2V"
@@ -226,6 +254,20 @@ models:
     description: "Animate still images into 6-second video clips"
     tags: ["video", "image-to-video", "quality"]
     size_gb: 12
+    requires_approval: false
+
+  wan22-i2v:
+    name: "Wan2.2 I2V"
+    path: "Wan-AI/Wan2.2-I2V-A14B-Diffusers"
+    type: "wan-i2v"
+    default_steps: 50
+    default_guidance: 5.0
+    default_num_frames: 81
+    default_fps: 16
+    category: "video"
+    description: "Animate images into video with Wan2.2 MoE architecture"
+    tags: ["video", "image-to-video", "quality"]
+    size_gb: 28
     requires_approval: false
 
   svd-xt:

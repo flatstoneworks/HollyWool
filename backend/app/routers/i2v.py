@@ -25,7 +25,7 @@ async def create_i2v_job(request: I2VGenerateRequest):
     if not model_config:
         raise HTTPException(status_code=400, detail=f"Unknown model: {request.model}")
 
-    if model_config.get("type") not in ["video-i2v", "svd"]:
+    if model_config.get("type") not in ["video-i2v", "svd", "wan-i2v"]:
         raise HTTPException(status_code=400, detail=f"Model {request.model} does not support I2V")
 
     # Validate image source is provided

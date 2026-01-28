@@ -141,14 +141,31 @@ async def get_asset(asset_id: str):
 @router.delete("/assets/{asset_id}")
 async def delete_asset(asset_id: str):
     output_dir = get_output_dir()
-    image_path = output_dir / f"{asset_id}.png"
     metadata_path = output_dir / f"{asset_id}.json"
 
     if not metadata_path.exists():
         raise HTTPException(status_code=404, detail="Asset not found")
 
+    # Read metadata to get actual filename (may be .png, .jpg, .webp, etc.)
+    image_path = None
+    try:
+        with open(metadata_path, "r") as f:
+            data = json.load(f)
+            if "filename" in data:
+                image_path = output_dir / data["filename"]
+    except Exception:
+        pass
+
+    # Fallback: try common extensions if metadata didn't resolve the file
+    if image_path is None or not image_path.exists():
+        for ext in (".png", ".jpg", ".webp"):
+            candidate = output_dir / f"{asset_id}{ext}"
+            if candidate.exists():
+                image_path = candidate
+                break
+
     # Delete both files
-    if image_path.exists():
+    if image_path and image_path.exists():
         image_path.unlink()
     if metadata_path.exists():
         metadata_path.unlink()

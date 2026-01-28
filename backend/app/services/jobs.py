@@ -81,6 +81,8 @@ class JobManager(BaseJobManager[Job]):
                 if not asset_path.exists():
                     asset_path = output_dir / f"{ref.image_asset_id}.jpg"
                 if not asset_path.exists():
+                    asset_path = output_dir / f"{ref.image_asset_id}.webp"
+                if not asset_path.exists():
                     raise ValueError(f"Asset not found: {ref.image_asset_id}")
                 img = Image.open(asset_path)
             else:

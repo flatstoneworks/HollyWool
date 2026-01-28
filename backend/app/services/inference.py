@@ -26,6 +26,24 @@ except ImportError:
     LTX2_AVAILABLE = False
     LTX2Pipeline = None
     ltx2_encode_video = None
+# Try to import Wan2.2 pipelines
+try:
+    from diffusers import WanPipeline, WanImageToVideoPipeline, AutoencoderKLWan
+    WAN_AVAILABLE = True
+except ImportError:
+    WAN_AVAILABLE = False
+    WanPipeline = None
+    WanImageToVideoPipeline = None
+    AutoencoderKLWan = None
+
+# Try to import Mochi pipeline
+try:
+    from diffusers import MochiPipeline
+    MOCHI_AVAILABLE = True
+except ImportError:
+    MOCHI_AVAILABLE = False
+    MochiPipeline = None
+
 from huggingface_hub import snapshot_download, HfFileSystem
 from PIL import Image
 
@@ -316,6 +334,41 @@ class InferenceService:
                     torch_dtype=svd_dtype,
                     variant="fp16" if self.device == "cuda" else None,
                 )
+            elif model_type == "wan":
+                if not WAN_AVAILABLE:
+                    raise ImportError(
+                        "Wan2.2 requires a newer version of diffusers. "
+                        "Install with: pip install -U diffusers"
+                    )
+                # Float32 VAE is critical — bfloat16 causes visible color banding
+                vae = AutoencoderKLWan.from_pretrained(
+                    model_path, subfolder="vae", torch_dtype=torch.float32
+                )
+                new_pipeline = WanPipeline.from_pretrained(
+                    model_path, vae=vae, torch_dtype=torch.bfloat16
+                )
+            elif model_type == "wan-i2v":
+                if not WAN_AVAILABLE:
+                    raise ImportError(
+                        "Wan2.2 I2V requires a newer version of diffusers. "
+                        "Install with: pip install -U diffusers"
+                    )
+                # Float32 VAE is critical — bfloat16 causes visible color banding
+                vae = AutoencoderKLWan.from_pretrained(
+                    model_path, subfolder="vae", torch_dtype=torch.float32
+                )
+                new_pipeline = WanImageToVideoPipeline.from_pretrained(
+                    model_path, vae=vae, torch_dtype=torch.bfloat16
+                )
+            elif model_type == "mochi":
+                if not MOCHI_AVAILABLE:
+                    raise ImportError(
+                        "Mochi requires a newer version of diffusers. "
+                        "Install with: pip install -U diffusers"
+                    )
+                new_pipeline = MochiPipeline.from_pretrained(
+                    model_path, variant="bf16", torch_dtype=torch.bfloat16
+                )
             else:
                 raise ValueError(f"Unknown model type: {model_type}")
         except Exception as e:
@@ -329,11 +382,17 @@ class InferenceService:
             torch.cuda.empty_cache()
 
         self.pipeline = new_pipeline
-        self.pipeline.to(self.device)
 
-        # Enable memory optimizations
-        if self.device == "cuda":
-            self.pipeline.enable_attention_slicing()
+        # Memory optimization: Wan/Mochi use cpu_offload (mutually exclusive with .to(device))
+        if model_type in ("wan", "wan-i2v", "mochi"):
+            self.pipeline.enable_model_cpu_offload()
+            if model_type == "mochi":
+                self.pipeline.enable_vae_tiling()
+        else:
+            self.pipeline.to(self.device)
+            # Enable memory optimizations
+            if self.device == "cuda":
+                self.pipeline.enable_attention_slicing()
 
         self.current_model_id = model_id
         print(f"Model loaded successfully: {model_id}")
@@ -555,6 +614,53 @@ class InferenceService:
                 print(f"Video saved to: {output_path}")
 
             return output_path, seed, num_frames, fps, audio_path
+        elif model_type == "wan":
+            # Wan2.2 T2V — resolution-dependent flow_shift
+            height_val = height if height else 480
+            flow_shift = 5.0 if height_val >= 720 else 3.0
+            self.pipeline.scheduler.config.flow_shift = flow_shift
+
+            gen_kwargs = {
+                "prompt": prompt,
+                "width": width,
+                "height": height,
+                "num_frames": num_frames,
+                "num_inference_steps": steps,
+                "guidance_scale": guidance_scale,
+                "generator": generator,
+            }
+
+            if negative_prompt:
+                gen_kwargs["negative_prompt"] = negative_prompt
+
+            video_frames = self.pipeline(**gen_kwargs).frames[0]
+
+            if output_path:
+                export_to_video(video_frames, output_path, fps=fps)
+                print(f"Video saved to: {output_path}")
+
+            return output_path, seed, len(video_frames), fps, None
+
+        elif model_type == "mochi":
+            # Mochi — does NOT support negative_prompt (T5-XXL single text input)
+            gen_kwargs = {
+                "prompt": prompt,
+                "width": width,
+                "height": height,
+                "num_frames": num_frames,
+                "num_inference_steps": steps,
+                "guidance_scale": guidance_scale,
+                "generator": generator,
+            }
+
+            video_frames = self.pipeline(**gen_kwargs).frames[0]
+
+            if output_path:
+                export_to_video(video_frames, output_path, fps=fps)
+                print(f"Video saved to: {output_path}")
+
+            return output_path, seed, len(video_frames), fps, None
+
         else:
             # CogVideoX and other video models
             gen_kwargs = {
@@ -620,7 +726,7 @@ class InferenceService:
         model_config = self.get_model_config(model_id)
         model_type = model_config["type"]
 
-        if model_type not in ["video-i2v", "svd"]:
+        if model_type not in ["video-i2v", "svd", "wan-i2v"]:
             raise ValueError(f"Model {model_id} (type: {model_type}) does not support I2V")
 
         # Set defaults from config
@@ -647,6 +753,24 @@ class InferenceService:
             gen_kwargs = {
                 "image": image,
                 "prompt": prompt,
+                "num_frames": num_frames,
+                "num_inference_steps": steps,
+                "guidance_scale": guidance_scale,
+                "generator": generator,
+            }
+
+            if negative_prompt:
+                gen_kwargs["negative_prompt"] = negative_prompt
+
+            video_frames = self.pipeline(**gen_kwargs).frames[0]
+
+        elif model_type == "wan-i2v":
+            # Wan2.2 Image-to-Video
+            gen_kwargs = {
+                "image": image,
+                "prompt": prompt,
+                "width": width,
+                "height": height,
                 "num_frames": num_frames,
                 "num_inference_steps": steps,
                 "guidance_scale": guidance_scale,
