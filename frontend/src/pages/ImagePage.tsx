@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { toast } from '@/hooks/use-toast'
 import { useResizableSidebar } from '@/hooks/useResizableSidebar'
 import { SessionSidebar } from '@/components/SessionSidebar'
+import { JobProgressCard } from '@/components/JobProgressCard'
 import { handleDownload as downloadFile } from '@/lib/download'
 import { fileToBase64 } from '@/lib/file-utils'
 import {
@@ -857,112 +858,39 @@ export function ImagePage() {
 
 
             {/* Generation in progress - Cards for ALL active jobs (persists across session switches) */}
-            {activeInProgressJobs.map(({ sessionId, job, sessionName }) => {
-              // Determine step states
-              const steps = [
-                { id: 'download', label: 'Download', active: job.status === 'downloading', completed: ['loading_model', 'generating', 'saving'].includes(job.status), skipped: job.status === 'queued' ? undefined : !job.download_total_mb && job.status !== 'downloading' },
-                { id: 'load', label: 'Load Model', active: job.status === 'loading_model', completed: ['generating', 'saving'].includes(job.status) },
-                { id: 'generate', label: 'Generate', active: job.status === 'generating', completed: job.status === 'saving' },
-                { id: 'save', label: 'Save', active: job.status === 'saving', completed: false },
-              ]
-
-              return (
-              <div key={job.id} className="card-container rounded-2xl overflow-hidden border border-primary/30 bg-primary/5">
-                {/* Card Header with status */}
-                <div className="px-4 py-3 border-b border-border">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
-                        <Loader2 className="h-3 w-3 animate-spin text-primary" />
-                      </div>
-                      <span className="text-sm font-medium text-foreground">
-                        {job.status === 'queued' ? 'Queued' :
-                         job.status === 'downloading' ? 'Downloading model' :
-                         job.status === 'loading_model' ? 'Loading model' :
-                         job.status === 'saving' ? 'Saving images' :
-                         `Generating image ${job.current_image}/${job.total_images}`}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {job.source_image_urls && job.source_image_urls.length > 0 && (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary flex items-center gap-1">
-                          <ImageIcon className="h-3 w-3" />
-                          I2I
-                        </span>
-                      )}
-                      {sessionId !== currentSession?.id && (
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-accent text-muted-foreground">
-                          {sessionName}
-                        </span>
-                      )}
-                      <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground/70">
-                        {job.model}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Step indicators */}
-                  <div className="flex items-center gap-1 mb-3">
-                    {steps.map((step, idx) => (
-                      <div key={step.id} className="flex items-center flex-1">
-                        <div className={cn(
-                          'flex-1 h-1.5 rounded-full transition-all duration-300',
-                          step.active ? 'bg-primary animate-pulse' :
-                          step.completed ? 'bg-primary' :
-                          step.skipped ? 'bg-muted' :
-                          'bg-accent'
-                        )} />
-                        {idx < steps.length - 1 && <div className="w-1" />}
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex justify-between text-[10px] text-muted-foreground/70 px-1">
-                    {steps.map(step => (
-                      <span key={step.id} className={cn(
-                        'transition-colors',
-                        step.active && 'text-primary font-medium',
-                        step.completed && 'text-muted-foreground',
-                        step.skipped && 'text-primary-foreground/20'
-                      )}>
-                        {step.label}
-                      </span>
-                    ))}
-                  </div>
-
-                  {/* Progress details */}
-                  <div className="mt-3 flex items-center gap-2">
-                    <div className="flex-1 h-1.5 bg-accent rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-primary transition-all duration-300"
-                        style={{ width: `${job.status === 'downloading' ? job.download_progress : job.progress}%` }}
-                      />
-                    </div>
-                    <span className="text-xs text-muted-foreground min-w-[3ch]">
-                      {job.status === 'downloading'
-                        ? `${Math.round(job.download_progress)}%`
-                        : `${Math.round(job.progress)}%`}
+            {activeInProgressJobs.map(({ sessionId, job, sessionName }) => (
+              <JobProgressCard
+                key={job.id}
+                className="card-container"
+                status={job.status}
+                progress={job.progress}
+                downloadProgress={job.download_progress}
+                downloadTotalMb={job.download_total_mb}
+                downloadSpeedMbps={job.download_speed_mbps}
+                etaSeconds={job.eta_seconds}
+                model={job.model}
+                statusLabel={
+                  job.status === 'queued' ? 'Queued' :
+                  job.status === 'downloading' ? 'Downloading model' :
+                  job.status === 'loading_model' ? 'Loading model' :
+                  job.status === 'saving' ? 'Saving images' :
+                  `Generating image ${job.current_image}/${job.total_images}`
+                }
+                headerBadges={<>
+                  {job.source_image_urls && job.source_image_urls.length > 0 && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary flex items-center gap-1">
+                      <ImageIcon className="h-3 w-3" />
+                      I2I
                     </span>
-                  </div>
-                  {/* Extra download info */}
-                  {job.status === 'downloading' && job.download_total_mb && (
-                    <div className="mt-1 text-xs text-muted-foreground/70">
-                      {job.download_total_mb > 1024
-                        ? `${(job.download_total_mb / 1024).toFixed(1)} GB`
-                        : `${Math.round(job.download_total_mb)} MB`}
-                      {job.download_speed_mbps && job.download_speed_mbps > 0 && (
-                        <> @ {job.download_speed_mbps.toFixed(1)} MB/s</>
-                      )}
-                    </div>
                   )}
-                  {/* ETA for generation */}
-                  {job.status !== 'downloading' && job.eta_seconds !== null && job.eta_seconds > 0 && (
-                    <div className="mt-1 text-xs text-muted-foreground/70">
-                      ~{Math.round(job.eta_seconds)}s remaining
-                    </div>
+                  {sessionId !== currentSession?.id && (
+                    <span className="text-xs px-2 py-0.5 rounded-full bg-accent text-muted-foreground">
+                      {sessionName}
+                    </span>
                   )}
-                </div>
-
-                {/* Card Images Grid - Responsive */}
+                </>}
+              >
+                {/* Card Images Grid */}
                 <div className={cn(
                   'grid gap-1 p-1',
                   job.num_images === 1 ? 'grid-cols-1' :
@@ -983,7 +911,7 @@ export function ImagePage() {
                   ))}
                 </div>
 
-                {/* Show prompt and source images */}
+                {/* Prompt and source images */}
                 <div className="px-4 py-3 border-t border-border">
                   {job.source_image_urls && job.source_image_urls.length > 0 && (
                     <div className="flex items-center gap-2 mb-2">
@@ -1004,8 +932,8 @@ export function ImagePage() {
                   )}
                   <p className="text-sm text-muted-foreground">{job.prompt}</p>
                 </div>
-              </div>
-            )})}
+              </JobProgressCard>
+            ))}
 
 
             {/* Empty state */}
