@@ -2,14 +2,17 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  ArrowLeft, Film, ImageIcon, Loader2, CheckCircle2, XCircle,
+  ArrowLeft, Loader2, CheckCircle2, XCircle,
   Clock, Cpu, HardDrive, Monitor, Download, Play, AlertCircle,
   RefreshCw, Timer
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { api, Job, VideoJob } from '@/api/client'
-
-type JobType = 'image' | 'video'
+import { api } from '@/api/client'
+import {
+  type JobType,
+  getJobTypeConfig,
+  resolveJobById,
+} from '@/lib/job-types'
 
 // Status step definitions
 const statusSteps = [
@@ -100,38 +103,23 @@ export function JobDetailPage() {
     return () => clearInterval(interval)
   }, [])
 
-  // Fetch job data -- try video first, then image
+  // Fetch job data using registry
   const { data: jobData, isLoading: loading, error: jobError } = useQuery({
     queryKey: ['job-detail', jobId, jobType],
     queryFn: async () => {
       if (!jobId) throw new Error('No job ID')
 
       // If we already know the type, fetch directly
-      if (jobType === 'video') {
-        const videoJob = await api.getVideoJob(jobId)
-        return { job: videoJob as Job | VideoJob, type: 'video' as JobType }
-      }
-      if (jobType === 'image') {
-        const imageJob = await api.getJob(jobId)
-        return { job: imageJob as Job | VideoJob, type: 'image' as JobType }
+      if (jobType) {
+        const config = getJobTypeConfig(jobType)
+        if (!config.fetchOne) throw new Error('Job type does not support direct fetch')
+        const job = await config.fetchOne(jobId)
+        return { job, type: jobType }
       }
 
-      // First fetch: try video first, then image
-      try {
-        const videoJob = await api.getVideoJob(jobId)
-        return { job: videoJob as Job | VideoJob, type: 'video' as JobType }
-      } catch {
-        // Not a video job, try image
-      }
-
-      try {
-        const imageJob = await api.getJob(jobId)
-        return { job: imageJob as Job | VideoJob, type: 'image' as JobType }
-      } catch {
-        // Not found
-      }
-
-      throw new Error('Job not found')
+      // First fetch: try each type via resolveJobById
+      const { job, config } = await resolveJobById(jobId)
+      return { job, type: config.type }
     },
     enabled: !!jobId,
     refetchInterval: (query) => {
@@ -152,6 +140,7 @@ export function JobDetailPage() {
   }, [jobData, jobType])
 
   const job = jobData?.job ?? null
+  const resolvedType = jobData?.type ?? jobType
   const error = jobError ? (jobError instanceof Error ? jobError.message : 'Failed to load job') : null
 
   // Fetch system status while job is active
@@ -175,13 +164,39 @@ export function JobDetailPage() {
     const currentStatus = job.status
     const currentTime = Date.now()
     const timings = stepTimingsRef.current
+    const currentIdx = getStatusIndex(currentStatus)
 
-    // If this status hasn't been seen before, mark its start time
-    if (!timings[currentStatus]) {
+    // On first load or when status changes, initialize timings properly
+    const isFirstLoad = Object.keys(timings).length === 0
+
+    if (isFirstLoad && job.created_at) {
+      // Initialize based on job's actual timestamps
+      const createdTime = new Date(job.created_at).getTime()
+      const startedTime = job.started_at ? new Date(job.started_at).getTime() : null
+
+      // Queued step: from created_at to started_at (or still ongoing)
+      if (currentStatus === 'queued') {
+        timings['queued'] = { startedAt: createdTime }
+      } else {
+        // Job has moved past queued
+        timings['queued'] = { startedAt: createdTime, endedAt: startedTime || createdTime }
+
+        // For steps between queued and current, mark them as passed
+        // We don't have exact timestamps, so use started_at as approximation
+        if (startedTime) {
+          // Current step started at started_at (or we approximate)
+          timings[currentStatus] = { startedAt: startedTime }
+        } else {
+          timings[currentStatus] = { startedAt: currentTime }
+        }
+      }
+
+      setStepTimings({ ...timings })
+    } else if (!timings[currentStatus]) {
+      // Status changed - mark transition
       timings[currentStatus] = { startedAt: currentTime }
 
-      // Mark previous step as ended (if it exists and isn't already ended)
-      const currentIdx = getStatusIndex(currentStatus)
+      // Mark previous step as ended
       if (currentIdx > 0) {
         const prevStep = statusSteps[currentIdx - 1]
         if (prevStep && timings[prevStep.key] && !timings[prevStep.key]!.endedAt) {
@@ -189,21 +204,6 @@ export function JobDetailPage() {
         }
       }
 
-      // If job started_at is available and we're past queued, use it for better accuracy
-      if (job.started_at && currentStatus !== 'queued' && !timings['queued']?.endedAt) {
-        const startedAtTime = new Date(job.started_at).getTime()
-        if (!timings['queued']) {
-          timings['queued'] = { startedAt: new Date(job.created_at).getTime(), endedAt: startedAtTime }
-        } else {
-          timings['queued'].endedAt = startedAtTime
-        }
-        // First non-queued step starts at started_at
-        if (timings[currentStatus] && currentIdx === 1) {
-          timings[currentStatus].startedAt = startedAtTime
-        }
-      }
-
-      // Update state to trigger re-render
       setStepTimings({ ...timings })
     }
 
@@ -211,7 +211,6 @@ export function JobDetailPage() {
     if ((currentStatus === 'completed' || currentStatus === 'failed') && job.completed_at) {
       const completedTime = new Date(job.completed_at).getTime()
       // End the previous step if not already ended
-      const currentIdx = getStatusIndex(currentStatus)
       if (currentIdx > 0) {
         const prevStep = statusSteps[currentIdx - 1]
         if (prevStep && timings[prevStep.key] && !timings[prevStep.key]!.endedAt) {
@@ -223,7 +222,7 @@ export function JobDetailPage() {
       }
       setStepTimings({ ...timings })
     }
-  }, [job?.status, job?.started_at, job?.completed_at])
+  }, [job?.status, job?.started_at, job?.completed_at, job?.created_at])
 
   if (loading) {
     return (
@@ -248,8 +247,9 @@ export function JobDetailPage() {
     )
   }
 
-  const isVideo = jobType === 'video'
-  const videoJob = isVideo ? (job as VideoJob) : null
+  // Config-driven header values
+  const config = resolvedType ? getJobTypeConfig(resolvedType) : null
+  const HeaderIcon = config?.icon ?? Monitor
   const currentStepIndex = getStatusIndex(job.status)
   const isFailed = job.status === 'failed'
   const isCompleted = job.status === 'completed'
@@ -263,7 +263,7 @@ export function JobDetailPage() {
   return (
     <div className="flex-1 overflow-y-auto scrollbar-thin">
       <div className="max-w-4xl mx-auto p-6 space-y-6">
-        {/* Header */}
+        {/* Header — data-driven from config */}
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigate(-1)}
@@ -272,19 +272,12 @@ export function JobDetailPage() {
             <ArrowLeft className="h-5 w-5" />
           </button>
           <div className="flex items-center gap-3">
-            <div className={cn(
-              'p-2 rounded-lg',
-              isVideo ? 'bg-purple-500/20' : 'bg-blue-500/20'
-            )}>
-              {isVideo ? (
-                <Film className="h-5 w-5 text-purple-400" />
-              ) : (
-                <ImageIcon className="h-5 w-5 text-blue-400" />
-              )}
+            <div className={cn('p-2 rounded-lg', config?.bgColor ?? 'bg-white/10')}>
+              <HeaderIcon className={cn('h-5 w-5', config?.iconColor ?? 'text-white')} />
             </div>
             <div>
               <h1 className="text-lg font-medium text-white">
-                {isVideo ? 'Video' : 'Image'} Generation
+                {config?.label ?? 'Job'} Generation
               </h1>
               <p className="text-xs text-white/40 font-mono">{job.id}</p>
             </div>
@@ -422,6 +415,21 @@ export function JobDetailPage() {
                         </div>
                       )}
 
+                      {/* Load progress */}
+                      {isCurrent && step.key === 'loading_model' && 'load_progress' in job && job.load_progress > 0 && (
+                        <div className="mt-2">
+                          <div className="h-1.5 bg-white/10 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-amber-500 transition-all"
+                              style={{ width: `${job.load_progress}%` }}
+                            />
+                          </div>
+                          <p className="text-xs text-white/40 mt-1">
+                            {job.load_progress.toFixed(0)}% loaded
+                          </p>
+                        </div>
+                      )}
+
                       {/* Generation progress */}
                       {isCurrent && step.key === 'generating' && (
                         <div className="mt-2">
@@ -455,7 +463,7 @@ export function JobDetailPage() {
             )}
           </div>
 
-          {/* Job Details */}
+          {/* Job Details — duck-typed field detection */}
           <div className="glass rounded-xl p-6">
             <h2 className="text-sm font-medium text-white/60 mb-4">Details</h2>
             <dl className="space-y-3">
@@ -484,17 +492,45 @@ export function JobDetailPage() {
                   <dd className="text-sm text-white mt-1">{job.steps}</dd>
                 </div>
               </div>
-              {isVideo && videoJob && (
+
+              {/* Video fields — renders for video, i2v, or any future type with these fields */}
+              {'num_frames' in job && 'fps' in job && (
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <dt className="text-xs text-white/40">Frames</dt>
-                    <dd className="text-sm text-white mt-1">{videoJob.num_frames} @ {videoJob.fps}fps</dd>
+                    <dd className="text-sm text-white mt-1">{job.num_frames} @ {job.fps}fps</dd>
                   </div>
                   <div>
                     <dt className="text-xs text-white/40">Duration</dt>
                     <dd className="text-sm text-white mt-1">
-                      {(videoJob.num_frames / videoJob.fps).toFixed(1)}s
+                      {(job.num_frames / job.fps).toFixed(1)}s
                     </dd>
+                  </div>
+                </div>
+              )}
+
+              {/* Source images — renders for i2v, image (I2I), or any future type */}
+              {'source_image_urls' in job && job.source_image_urls?.length > 0 && (
+                <div>
+                  <dt className="text-xs text-white/40 mb-2">Source Images</dt>
+                  <dd className="flex items-center gap-2">
+                    {job.source_image_urls.map((url: string, idx: number) => (
+                      <img key={idx} src={url} alt={`Source ${idx + 1}`} className="h-16 w-auto rounded-lg object-cover" />
+                    ))}
+                  </dd>
+                </div>
+              )}
+
+              {/* Upscale info — renders for any type with source_width */}
+              {'source_width' in job && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <dt className="text-xs text-white/40">Source</dt>
+                    <dd className="text-sm text-white mt-1">{job.source_width} × {job.source_height}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-white/40">Target</dt>
+                    <dd className="text-sm text-white mt-1">{job.target_width} × {job.target_height} ({job.scale_factor}×)</dd>
                   </div>
                 </div>
               )}
@@ -586,35 +622,39 @@ export function JobDetailPage() {
           </div>
         )}
 
-        {/* Result Preview (for completed video jobs) */}
-        {isCompleted && isVideo && videoJob?.video && (
-          <div className="glass rounded-xl overflow-hidden">
-            <div className="p-4 border-b border-white/10">
-              <h2 className="text-sm font-medium text-white/60">Result</h2>
-            </div>
-            <div className="relative aspect-video bg-black">
-              <video
-                src={videoJob.video.url}
-                controls
-                className="w-full h-full object-contain"
-              />
-            </div>
-            <div className="p-4 flex items-center justify-between">
-              <div className="text-sm text-white/60">
-                {videoJob.video.width}×{videoJob.video.height} • {videoJob.video.duration.toFixed(1)}s • {videoJob.video.fps}fps
-                {videoJob.video.has_audio && ' • Audio'}
+        {/* Result Preview — duck-typed: any job with a video field */}
+        {(() => {
+          if (!isCompleted || !('video' in job) || !job.video) return null
+          const resultVideo = job.video
+          return (
+            <div className="glass rounded-xl overflow-hidden">
+              <div className="p-4 border-b border-white/10">
+                <h2 className="text-sm font-medium text-white/60">Result</h2>
               </div>
-              <a
-                href={videoJob.video.url}
-                download={videoJob.video.filename}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white text-sm font-medium transition-colors"
-              >
-                <Download className="h-4 w-4" />
-                Download
-              </a>
+              <div className="relative aspect-video bg-black">
+                <video
+                  src={resultVideo.url}
+                  controls
+                  className="w-full h-full object-contain"
+                />
+              </div>
+              <div className="p-4 flex items-center justify-between">
+                <div className="text-sm text-white/60">
+                  {resultVideo.width}×{resultVideo.height} • {resultVideo.duration.toFixed(1)}s • {resultVideo.fps}fps
+                  {resultVideo.has_audio && ' • Audio'}
+                </div>
+                <a
+                  href={resultVideo.url}
+                  download={resultVideo.filename}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white text-sm font-medium transition-colors"
+                >
+                  <Download className="h-4 w-4" />
+                  Download
+                </a>
+              </div>
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Error Details */}
         {isFailed && job.error && (
@@ -629,7 +669,7 @@ export function JobDetailPage() {
           </div>
         )}
 
-        {/* Navigation */}
+        {/* Navigation — data-driven from config */}
         <div className="flex items-center justify-between pt-4">
           <button
             onClick={() => navigate(-1)}
@@ -637,12 +677,12 @@ export function JobDetailPage() {
           >
             Go Back
           </button>
-          {isCompleted && (
+          {isCompleted && config && (
             <Link
-              to={isVideo ? '/video' : '/image'}
+              to={config.navigateTo}
               className="px-4 py-2 rounded-lg bg-primary hover:bg-primary/90 text-white text-sm font-medium transition-colors"
             >
-              Generate More
+              {config.completedLabel || 'Generate More'}
             </Link>
           )}
         </div>

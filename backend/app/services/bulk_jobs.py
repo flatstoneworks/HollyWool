@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..models.schemas import BulkJob, BulkImageItem, JobStatus
+from ..utils.paths import get_output_dir
 from .base_job_manager import BaseJobManager
 from . import fal_client
 
@@ -28,6 +29,7 @@ class BulkJobManager(BaseJobManager[BulkJob]):
         height: int = 1024,
         steps: int | None = None,
         base_prompt: str | None = None,
+        session_id: str | None = None,
     ) -> BulkJob:
         """Create a new bulk generation job."""
         job_id = str(uuid.uuid4())
@@ -39,6 +41,7 @@ class BulkJobManager(BaseJobManager[BulkJob]):
 
         job = BulkJob(
             id=job_id,
+            session_id=session_id,
             status=JobStatus.QUEUED,
             progress=0.0,
             total=len(prompts),
@@ -101,8 +104,7 @@ class BulkJobManager(BaseJobManager[BulkJob]):
         if not job:
             return
 
-        output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = get_output_dir()
 
         for i, item in enumerate(job.items):
             # Check if job was cancelled

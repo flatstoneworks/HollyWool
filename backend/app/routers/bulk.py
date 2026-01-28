@@ -59,6 +59,7 @@ async def create_bulk_job(request: BulkImageRequest):
         height=request.height,
         steps=request.steps,
         base_prompt=request.base_prompt,
+        session_id=request.session_id,
     )
 
     return BulkJobResponse(

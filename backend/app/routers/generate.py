@@ -77,15 +77,10 @@ from ..services.inference import get_inference_service
 from ..services.jobs import get_job_manager
 from ..services.lora_manager import get_lora_manager
 from ..services.hf_downloads import get_hf_download_tracker, HFDownloadJob
+from ..utils.paths import get_output_dir
 from .settings import add_log, RequestLog
 
 router = APIRouter(prefix="/api", tags=["generate"])
-
-
-def get_output_dir() -> Path:
-    output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir
 
 
 def _detect_hostname() -> str | None:

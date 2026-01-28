@@ -33,9 +33,10 @@ async def create_i2v_job(request: I2VGenerateRequest):
         raise HTTPException(status_code=400, detail="Must provide reference_images, image_base64, or image_asset_id")
 
     # Check system resources before accepting job
-    model_size_gb = model_config.get("size_gb", 12)
+    # Use memory_gb (actual RAM) if available, otherwise fall back to size_gb (disk size)
+    model_memory_gb = model_config.get("memory_gb") or model_config.get("size_gb", 12)
     model_name = model_config.get("name", request.model)
-    resource_status = check_resources_for_video(model_size_gb, model_name)
+    resource_status = check_resources_for_video(model_memory_gb, model_name)
 
     if not resource_status.is_available:
         raise HTTPException(
@@ -45,7 +46,7 @@ async def create_i2v_job(request: I2VGenerateRequest):
                 "message": resource_status.rejection_reason,
                 "resources": {
                     "memory_available_gb": round(resource_status.memory_available_gb, 1),
-                    "memory_required_gb": round(model_size_gb + 5.0 + 10.0, 1),
+                    "memory_required_gb": round(model_memory_gb + 5.0 + 10.0, 1),
                     "gpu_utilization": resource_status.gpu_utilization,
                     "cpu_percent": round(resource_status.cpu_percent, 1),
                 }

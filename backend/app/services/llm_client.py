@@ -2,14 +2,14 @@
 
 import json
 import logging
-from pathlib import Path
 
 import httpx
 
+from ..utils.paths import get_data_dir
+
 logger = logging.getLogger(__name__)
 
-_DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
-_PROVIDERS_PATH = _DATA_DIR / "providers.json"
+_PROVIDERS_PATH = get_data_dir() / "providers.json"
 
 
 def _get_anthropic_key() -> str:

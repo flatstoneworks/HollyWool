@@ -23,6 +23,13 @@ import { PREVIEW_MODELS, PROVIDER_PRESETS, type ModelProvider } from '@/types/pr
 type AspectRatio = '16:9' | '9:16' | '1:1'
 type Resolution = '720p' | '1080p'
 
+interface VideoSessionSettings {
+  model: string
+  style: string
+  aspectRatio: AspectRatio
+  resolution: Resolution
+}
+
 // Video generation models
 interface VideoModel {
   id: string
@@ -165,6 +172,36 @@ export function VideoPage() {
   const [sessions, setSessions] = useState<VideoSession[]>([])
   const [currentSession, setCurrentSession] = useState<VideoSession | null>(null)
 
+  // Session prompt drafts - persisted to localStorage
+  const [sessionDrafts, setSessionDrafts] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('hollywool_video_session_drafts')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  // Session source image previews (for I2V) - persisted to localStorage
+  const [sessionSourceImages, setSessionSourceImages] = useState<Record<string, string | null>>(() => {
+    try {
+      const saved = localStorage.getItem('hollywool_video_session_source_images')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  // Session settings - persisted to localStorage
+  const [sessionSettings, setSessionSettings] = useState<Record<string, VideoSessionSettings>>(() => {
+    try {
+      const saved = localStorage.getItem('hollywool_video_session_settings')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+
   // Resizable sidebar
   const { sidebarWidth, isResizing, handleResizeStart } = useResizableSidebar()
 
@@ -197,6 +234,64 @@ export function VideoPage() {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showModelMenu, showStyleMenu, showAspectMenu, showResolutionMenu])
+
+  // Persist session drafts to localStorage
+  useEffect(() => {
+    localStorage.setItem('hollywool_video_session_drafts', JSON.stringify(sessionDrafts))
+  }, [sessionDrafts])
+
+  // Persist session source images to localStorage
+  useEffect(() => {
+    localStorage.setItem('hollywool_video_session_source_images', JSON.stringify(sessionSourceImages))
+  }, [sessionSourceImages])
+
+  // Persist session settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('hollywool_video_session_settings', JSON.stringify(sessionSettings))
+  }, [sessionSettings])
+
+  // Save prompt to current session's draft whenever it changes
+  useEffect(() => {
+    if (currentSession) {
+      setSessionDrafts(prev => {
+        if (prev[currentSession.id] === prompt) return prev
+        return { ...prev, [currentSession.id]: prompt }
+      })
+    }
+  }, [prompt, currentSession?.id])
+
+  // Save source image preview to current session whenever it changes
+  useEffect(() => {
+    if (currentSession) {
+      setSessionSourceImages(prev => {
+        if (prev[currentSession.id] === sourceImagePreview) return prev
+        return { ...prev, [currentSession.id]: sourceImagePreview }
+      })
+    }
+  }, [sourceImagePreview, currentSession?.id])
+
+  // Save settings to current session whenever they change
+  useEffect(() => {
+    if (currentSession) {
+      const newSettings: VideoSessionSettings = {
+        model: selectedModel,
+        style: selectedStyle,
+        aspectRatio,
+        resolution,
+      }
+      setSessionSettings(prev => {
+        const existing = prev[currentSession.id]
+        if (existing &&
+            existing.model === newSettings.model &&
+            existing.style === newSettings.style &&
+            existing.aspectRatio === newSettings.aspectRatio &&
+            existing.resolution === newSettings.resolution) {
+          return prev
+        }
+        return { ...prev, [currentSession.id]: newSettings }
+      })
+    }
+  }, [selectedModel, selectedStyle, aspectRatio, resolution, currentSession?.id])
 
   // Video generation state - track jobs by ID like ImagePage
   const [activeJobs, setActiveJobs] = useState<Record<string, VideoJob>>({})
@@ -242,6 +337,27 @@ export function VideoPage() {
 
       setCurrentSession(session)
       setSessions(getVideoSessions())
+
+      // Load draft, source image, and settings for initial session
+      if (session) {
+        const draft = sessionDrafts[session.id] || ''
+        setPrompt(draft)
+        // Restore source image preview
+        const savedPreview = sessionSourceImages[session.id]
+        if (savedPreview) {
+          setSourceImagePreview(savedPreview)
+          // Create a placeholder file since we only have the preview
+          setSourceImage(new File([], 'restored.png', { type: 'image/png' }))
+        }
+        // Restore settings
+        const savedSettings = sessionSettings[session.id]
+        if (savedSettings) {
+          setSelectedModel(savedSettings.model)
+          setSelectedStyle(savedSettings.style)
+          setAspectRatio(savedSettings.aspectRatio)
+          setResolution(savedSettings.resolution)
+        }
+      }
     }
     initSessions()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -609,10 +725,23 @@ export function VideoPage() {
   }
 
   const handleNewSession = () => {
+    // Save current session state before switching
+    if (currentSession) {
+      setSessionDrafts(prev => ({ ...prev, [currentSession.id]: prompt }))
+      setSessionSourceImages(prev => ({ ...prev, [currentSession.id]: sourceImagePreview }))
+      setSessionSettings(prev => ({ ...prev, [currentSession.id]: {
+        model: selectedModel,
+        style: selectedStyle,
+        aspectRatio,
+        resolution,
+      }}))
+    }
     const session = createVideoSession()
     setSessions(getVideoSessions())
     setCurrentSession(session)
     setPrompt('')
+    setSourceImage(null)
+    setSourceImagePreview(null)
     // Push new session to URL (creates history entry)
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
@@ -624,8 +753,38 @@ export function VideoPage() {
   const handleSwitchSession = (sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId)
     if (!session) return
+    // Save current session state before switching
+    if (currentSession) {
+      setSessionDrafts(prev => ({ ...prev, [currentSession.id]: prompt }))
+      setSessionSourceImages(prev => ({ ...prev, [currentSession.id]: sourceImagePreview }))
+      setSessionSettings(prev => ({ ...prev, [currentSession.id]: {
+        model: selectedModel,
+        style: selectedStyle,
+        aspectRatio,
+        resolution,
+      }}))
+    }
     setCurrentVideoSessionId(session.id)
     setCurrentSession(session)
+    // Restore draft for new session
+    setPrompt(sessionDrafts[session.id] || '')
+    // Restore source image
+    const savedPreview = sessionSourceImages[session.id]
+    if (savedPreview) {
+      setSourceImagePreview(savedPreview)
+      setSourceImage(new File([], 'restored.png', { type: 'image/png' }))
+    } else {
+      setSourceImage(null)
+      setSourceImagePreview(null)
+    }
+    // Restore settings
+    const savedSettings = sessionSettings[session.id]
+    if (savedSettings) {
+      setSelectedModel(savedSettings.model)
+      setSelectedStyle(savedSettings.style)
+      setAspectRatio(savedSettings.aspectRatio)
+      setResolution(savedSettings.resolution)
+    }
     // Push session to URL (creates history entry)
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
@@ -636,11 +795,46 @@ export function VideoPage() {
 
   const handleDeleteSession = (id: string) => {
     deleteVideoSession(id)
+    // Clean up session data
+    setSessionDrafts(prev => {
+      const updated = { ...prev }
+      delete updated[id]
+      return updated
+    })
+    setSessionSourceImages(prev => {
+      const updated = { ...prev }
+      delete updated[id]
+      return updated
+    })
+    setSessionSettings(prev => {
+      const updated = { ...prev }
+      delete updated[id]
+      return updated
+    })
     setSessions(getVideoSessions())
     const newCurrentId = getCurrentVideoSessionId()
     if (newCurrentId) {
       const newSession = getVideoSessions().find(s => s.id === newCurrentId)
       setCurrentSession(newSession || null)
+      // Restore data for new current session
+      if (newSession) {
+        setPrompt(sessionDrafts[newSession.id] || '')
+        const savedPreview = sessionSourceImages[newSession.id]
+        if (savedPreview) {
+          setSourceImagePreview(savedPreview)
+          setSourceImage(new File([], 'restored.png', { type: 'image/png' }))
+        } else {
+          setSourceImage(null)
+          setSourceImagePreview(null)
+        }
+        const savedSettings = sessionSettings[newSession.id]
+        if (savedSettings) {
+          setSelectedModel(savedSettings.model)
+          setSelectedStyle(savedSettings.style)
+          setAspectRatio(savedSettings.aspectRatio)
+          setResolution(savedSettings.resolution)
+        }
+      }
     }
   }
 
@@ -716,6 +910,7 @@ export function VideoPage() {
                 downloadProgress={job.download_progress}
                 downloadTotalMb={job.download_total_mb}
                 downloadSpeedMbps={job.download_speed_mbps}
+                loadProgress={job.load_progress}
                 etaSeconds={job.eta_seconds}
                 model={job.model}
                 statusLabel={
@@ -751,6 +946,7 @@ export function VideoPage() {
                 downloadProgress={job.download_progress}
                 downloadTotalMb={job.download_total_mb}
                 downloadSpeedMbps={job.download_speed_mbps}
+                loadProgress={job.load_progress}
                 etaSeconds={job.eta_seconds}
                 model={job.model}
                 statusLabel={

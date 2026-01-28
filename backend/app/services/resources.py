@@ -2,9 +2,45 @@
 System resource monitoring for video generation.
 Checks memory availability and GPU utilization before accepting jobs.
 """
+import platform
 import psutil
 from typing import Optional
 from dataclasses import dataclass
+
+
+def get_cpu_name() -> Optional[str]:
+    """Get CPU model name."""
+    try:
+        # Try /proc/cpuinfo on Linux (x86)
+        with open("/proc/cpuinfo", "r") as f:
+            for line in f:
+                if line.startswith("model name"):
+                    return line.split(":")[1].strip()
+    except Exception:
+        pass
+
+    try:
+        # Try lscpu for ARM/other architectures
+        import subprocess
+        result = subprocess.run(
+            ["lscpu"],
+            capture_output=True,
+            text=True,
+            timeout=2
+        )
+        for line in result.stdout.split("\n"):
+            if line.startswith("Model name:"):
+                return line.split(":")[1].strip()
+    except Exception:
+        pass
+
+    # Fallback to platform
+    proc = platform.processor()
+    if proc and proc != "aarch64":
+        return proc
+
+    # Final fallback: architecture + machine
+    return f"{platform.machine()} ({platform.system()})"
 
 
 # Try to import pynvml for GPU utilization (memory queries won't work on DGX Spark unified arch)
@@ -38,6 +74,9 @@ class ResourceStatus:
     memory_percent: float
     gpu_utilization: Optional[float]  # 0-100 percent, None if unavailable
     cpu_percent: float
+    cpu_name: Optional[str]
+    cpu_cores: int
+    cpu_threads: int
     is_available: bool
     rejection_reason: Optional[str]
 
@@ -72,6 +111,9 @@ def get_system_resources() -> ResourceStatus:
         memory_percent=memory.percent,
         gpu_utilization=gpu_util,
         cpu_percent=cpu_percent,
+        cpu_name=get_cpu_name(),
+        cpu_cores=psutil.cpu_count(logical=False) or 1,
+        cpu_threads=psutil.cpu_count(logical=True) or 1,
         is_available=True,  # Will be set by check function
         rejection_reason=None,
     )

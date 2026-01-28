@@ -8,6 +8,7 @@ interface JobProgressCardProps {
   downloadProgress: number
   downloadTotalMb: number | null
   downloadSpeedMbps: number | null
+  loadProgress?: number
   etaSeconds: number | null
   model: string
   statusLabel: string
@@ -22,6 +23,7 @@ export function JobProgressCard({
   downloadProgress,
   downloadTotalMb,
   downloadSpeedMbps,
+  loadProgress = 0,
   etaSeconds,
   model,
   statusLabel,
@@ -35,14 +37,16 @@ export function JobProgressCard({
       label: 'Download',
       active: status === 'downloading',
       completed: ['loading_model', 'generating', 'saving'].includes(status),
-      skipped: status === 'queued' ? undefined : !downloadTotalMb && status !== 'downloading',
+      skipped: ['queued', 'submitting'].includes(status) ? undefined : !downloadTotalMb && status !== 'downloading',
     },
     { id: 'load', label: 'Load Model', active: status === 'loading_model', completed: ['generating', 'saving'].includes(status) },
     { id: 'generate', label: 'Generate', active: status === 'generating', completed: status === 'saving' },
     { id: 'save', label: 'Save', active: status === 'saving', completed: false },
   ]
 
-  const displayProgress = status === 'downloading' ? downloadProgress : progress
+  const displayProgress = status === 'downloading' ? downloadProgress :
+                          status === 'loading_model' ? loadProgress :
+                          progress
 
   return (
     <div className={cn('rounded-2xl overflow-hidden border border-primary/30 bg-primary/5', className)}>
@@ -120,6 +124,13 @@ export function JobProgressCard({
         {status !== 'downloading' && etaSeconds != null && etaSeconds > 0 && (
           <div className="mt-1 text-xs text-muted-foreground/70">
             ~{etaSeconds >= 60 ? `${Math.ceil(etaSeconds / 60)} min` : `${Math.round(etaSeconds)}s`} remaining
+          </div>
+        )}
+
+        {/* Submitting indicator */}
+        {status === 'submitting' && (
+          <div className="mt-2 text-xs text-muted-foreground/70">
+            Submitting to server...
           </div>
         )}
 

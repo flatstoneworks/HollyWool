@@ -13,6 +13,7 @@ from typing import TypeVar, Generic, Optional, Dict, Type
 from queue import Queue
 
 from ..models.schemas import JobStatus
+from ..utils.paths import get_data_dir
 
 T = TypeVar("T")
 
@@ -43,9 +44,7 @@ class BaseJobManager(Generic[T]):
         self.worker_thread.start()
 
     def _get_jobs_file(self) -> Path:
-        data_dir = Path(__file__).parent.parent.parent.parent / "data"
-        data_dir.mkdir(parents=True, exist_ok=True)
-        return data_dir / self._jobs_filename
+        return get_data_dir() / self._jobs_filename
 
     def _load_jobs(self) -> None:
         """Load jobs from file on startup."""

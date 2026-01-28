@@ -6,6 +6,8 @@ from typing import Optional, List, Literal
 from pydantic import BaseModel
 from fastapi import APIRouter, Query
 
+from ..utils.paths import get_data_dir
+
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
@@ -61,13 +63,6 @@ class SystemInfo(BaseModel):
 
 
 # ============== File Helpers ==============
-
-def get_data_dir() -> Path:
-    """Get the data directory."""
-    data_dir = Path(__file__).parent.parent.parent.parent / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir
-
 
 def get_settings_file() -> Path:
     """Get the path to the settings JSON file."""

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..models.schemas import VideoJob, VideoResult, JobStatus, VideoGenerateRequest
+from ..utils.paths import get_output_dir
 from .inference import get_inference_service
 from .base_job_manager import BaseJobManager
 
@@ -60,6 +61,9 @@ class VideoJobManager(BaseJobManager[VideoJob]):
         steps = request.steps if request.steps else model_config["default_steps"]
         num_frames = request.num_frames if request.num_frames else model_config.get("default_num_frames", 49)
         fps = request.fps if request.fps else model_config.get("default_fps", 8)
+        # Use config defaults for width/height if model specifies them
+        width = model_config.get("default_width", request.width)
+        height = model_config.get("default_height", request.height)
 
         job = VideoJob(
             id=str(uuid.uuid4()),
@@ -70,8 +74,8 @@ class VideoJobManager(BaseJobManager[VideoJob]):
             total_frames=num_frames,
             prompt=request.prompt,
             model=request.model,
-            width=request.width,
-            height=request.height,
+            width=width,
+            height=height,
             steps=steps,
             num_frames=num_frames,
             fps=fps,
@@ -104,6 +108,10 @@ class VideoJobManager(BaseJobManager[VideoJob]):
             # Check if model needs downloading
             needs_download = not service.is_model_cached(job.model)
 
+            # Load progress callback
+            def load_progress_callback(progress_pct: float):
+                self._update_job(job_id, load_progress=progress_pct)
+
             if needs_download:
                 # Update to downloading status
                 self._update_job(job_id,
@@ -119,24 +127,24 @@ class VideoJobManager(BaseJobManager[VideoJob]):
                                    download_speed_mbps=speed_mbps)
 
                 # Load model with download tracking
-                self._update_job(job_id, status=JobStatus.LOADING_MODEL)
-                service.load_model(job.model, download_callback=download_progress_callback)
+                self._update_job(job_id, status=JobStatus.LOADING_MODEL, load_progress=0)
+                service.load_model(job.model, download_callback=download_progress_callback, load_progress_callback=load_progress_callback)
             else:
                 # Update to loading model status
                 self._update_job(job_id,
                                status=JobStatus.LOADING_MODEL,
-                               started_at=datetime.utcnow())
+                               started_at=datetime.utcnow(),
+                               load_progress=0)
 
-                # Load model if needed (no download)
-                service.load_model(job.model)
+                # Load model if needed (no download) with progress tracking
+                service.load_model(job.model, load_progress_callback=load_progress_callback)
 
             # Update to generating status
             self._update_job(job_id,
                            status=JobStatus.GENERATING,
                            progress=10.0)
 
-            output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            output_dir = get_output_dir()
 
             # Generate video
             asset_id = str(uuid.uuid4())

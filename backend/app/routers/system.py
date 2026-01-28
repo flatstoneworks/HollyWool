@@ -22,6 +22,9 @@ async def get_system_status():
         memory_percent=round(status.memory_percent, 1),
         gpu_utilization=round(status.gpu_utilization, 1) if status.gpu_utilization is not None else None,
         cpu_percent=round(status.cpu_percent, 1),
+        cpu_name=status.cpu_name,
+        cpu_cores=status.cpu_cores,
+        cpu_threads=status.cpu_threads,
         is_available=status.is_available,
         rejection_reason=status.rejection_reason,
     )
@@ -36,18 +39,20 @@ async def check_can_generate(model_id: str):
     if not model_config:
         raise HTTPException(status_code=404, detail=f"Model not found: {model_id}")
 
-    model_size_gb = model_config.get("size_gb", 12)
+    # Use memory_gb (actual RAM) if available, otherwise fall back to size_gb (disk size)
+    model_memory_gb = model_config.get("memory_gb") or model_config.get("size_gb", 12)
     model_name = model_config.get("name", model_id)
 
-    status = check_resources_for_video(model_size_gb, model_name)
+    status = check_resources_for_video(model_memory_gb, model_name)
 
     # Find video models that would fit in current memory
     recommended = []
     for mid, mconfig in service.config["models"].items():
         if mconfig.get("type") in ["video", "ltx2"]:
-            size = mconfig.get("size_gb", 12)
+            # Use memory_gb if available, otherwise size_gb
+            mem = mconfig.get("memory_gb") or mconfig.get("size_gb", 12)
             # Required: model + 5GB overhead + 10GB buffer
-            if status.memory_available_gb >= (size + 5.0 + 10.0):
+            if status.memory_available_gb >= (mem + 5.0 + 10.0):
                 recommended.append(mid)
 
     return ResourceCheckResponse(
@@ -59,6 +64,9 @@ async def check_can_generate(model_id: str):
             memory_percent=round(status.memory_percent, 1),
             gpu_utilization=round(status.gpu_utilization, 1) if status.gpu_utilization is not None else None,
             cpu_percent=round(status.cpu_percent, 1),
+            cpu_name=status.cpu_name,
+            cpu_cores=status.cpu_cores,
+            cpu_threads=status.cpu_threads,
             is_available=status.is_available,
             rejection_reason=status.rejection_reason,
         ),

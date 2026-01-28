@@ -25,6 +25,14 @@ import { PREVIEW_MODELS, PROVIDER_PRESETS, type ModelProvider } from '@/types/pr
 
 type AspectRatio = '1:1' | '16:9' | '9:16' | '4:3' | '3:4'
 
+interface SessionSettings {
+  model: string
+  style: string
+  strength: number
+  aspectRatio: AspectRatio
+  imageCount: number
+}
+
 const aspectRatios: { value: AspectRatio; label: string; width: number; height: number }[] = [
   { value: '1:1', label: '1:1', width: 1024, height: 1024 },
   { value: '16:9', label: '16:9', width: 1344, height: 768 },
@@ -82,6 +90,26 @@ export function ImagePage() {
     }
   })
 
+  // Session reference images - persisted to localStorage (as base64 previews)
+  const [sessionRefImages, setSessionRefImages] = useState<Record<string, string[]>>(() => {
+    try {
+      const saved = localStorage.getItem('hollywool_session_ref_images')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+
+  // Session settings (model, style, strength, etc.) - persisted to localStorage
+  const [sessionSettings, setSessionSettings] = useState<Record<string, SessionSettings>>(() => {
+    try {
+      const saved = localStorage.getItem('hollywool_session_settings')
+      return saved ? JSON.parse(saved) : {}
+    } catch {
+      return {}
+    }
+  })
+
   // Job tracking - map job_id to job (supports multiple queued jobs)
   const [activeJobs, setActiveJobs] = useState<Record<string, Job>>({})
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -125,6 +153,16 @@ export function ImagePage() {
     localStorage.setItem('hollywool_session_drafts', JSON.stringify(sessionDrafts))
   }, [sessionDrafts])
 
+  // Persist session reference images to localStorage
+  useEffect(() => {
+    localStorage.setItem('hollywool_session_ref_images', JSON.stringify(sessionRefImages))
+  }, [sessionRefImages])
+
+  // Persist session settings to localStorage
+  useEffect(() => {
+    localStorage.setItem('hollywool_session_settings', JSON.stringify(sessionSettings))
+  }, [sessionSettings])
+
   // Save prompt to current session's draft whenever it changes
   useEffect(() => {
     if (currentSession) {
@@ -135,6 +173,45 @@ export function ImagePage() {
       })
     }
   }, [prompt, currentSession?.id])
+
+  // Save reference images to current session whenever they change
+  useEffect(() => {
+    if (currentSession) {
+      const previews = referenceImages.map(ref => ref.preview)
+      setSessionRefImages(prev => {
+        const existing = prev[currentSession.id] || []
+        // Only update if actually changed
+        if (JSON.stringify(existing) === JSON.stringify(previews)) return prev
+        return { ...prev, [currentSession.id]: previews }
+      })
+    }
+  }, [referenceImages, currentSession?.id])
+
+  // Save settings to current session whenever they change
+  useEffect(() => {
+    if (currentSession) {
+      const newSettings: SessionSettings = {
+        model: selectedModel,
+        style: selectedStyle,
+        strength,
+        aspectRatio,
+        imageCount,
+      }
+      setSessionSettings(prev => {
+        const existing = prev[currentSession.id]
+        // Only update if actually changed
+        if (existing &&
+            existing.model === newSettings.model &&
+            existing.style === newSettings.style &&
+            existing.strength === newSettings.strength &&
+            existing.aspectRatio === newSettings.aspectRatio &&
+            existing.imageCount === newSettings.imageCount) {
+          return prev
+        }
+        return { ...prev, [currentSession.id]: newSettings }
+      })
+    }
+  }, [selectedModel, selectedStyle, strength, aspectRatio, imageCount, currentSession?.id])
 
   // Initialize sessions - resolve from URL or set default
   useEffect(() => {
@@ -167,10 +244,30 @@ export function ImagePage() {
 
       setCurrentSession(session)
       setSessions(getSessions())
-      // Load draft for initial session
+      // Load draft, reference images, and settings for initial session
       if (session) {
         const draft = sessionDrafts[session.id] || ''
         setPrompt(draft)
+        // Restore reference images from saved previews
+        const savedPreviews = sessionRefImages[session.id] || []
+        if (savedPreviews.length > 0) {
+          // Convert base64 previews back to reference image format
+          // We create a minimal File object since we only have the preview
+          const restoredRefs = savedPreviews.map((preview, i) => ({
+            file: new File([], `restored-${i}.png`, { type: 'image/png' }),
+            preview,
+          }))
+          setReferenceImages(restoredRefs)
+        }
+        // Restore settings for this session
+        const savedSettings = sessionSettings[session.id]
+        if (savedSettings) {
+          setSelectedModel(savedSettings.model)
+          setSelectedStyle(savedSettings.style)
+          setStrength(savedSettings.strength)
+          setAspectRatio(savedSettings.aspectRatio)
+          setImageCount(savedSettings.imageCount)
+        }
       }
     }
     loadSessions()
@@ -263,7 +360,8 @@ export function ImagePage() {
       const jobIds = Object.keys(activeJobs)
       for (const jobId of jobIds) {
         const job = activeJobs[jobId]
-        if (!job || job.status === 'completed' || job.status === 'failed') continue
+        // Skip completed, failed, or submitting jobs (submitting jobs don't exist on backend yet)
+        if (!job || job.status === 'completed' || job.status === 'failed' || job.status === 'submitting') continue
 
         try {
           const updatedJob = await api.getJob(job.id)
@@ -332,52 +430,106 @@ export function ImagePage() {
     return () => clearInterval(interval)
   }, [activeJobs, currentSession?.id, refetchAssets])
 
-  // Submit a new generation job
+  // Submit a new generation job (optimistic - shows immediately)
   const submitJob = async () => {
     if (!prompt.trim() || !currentSession || isSubmitting) return
 
     setIsSubmitting(true)
     const fullPrompt = selectedStyleInfo.prefix + prompt.trim()
 
-    try {
-      // Build reference_images array if any
-      let reference_images: { image_base64: string }[] | undefined
-      if (referenceImages.length > 0) {
-        reference_images = []
-        for (const ref of referenceImages) {
-          const base64 = await fileToBase64(ref.file)
-          reference_images.push({ image_base64: base64 })
-        }
-      }
+    // Generate a temporary ID for the optimistic job
+    const tempId = `temp-${Date.now()}`
 
-      const response = await api.createJob({
-        prompt: fullPrompt,
-        model: selectedModel,
-        width: selectedAspect.width,
-        height: selectedAspect.height,
-        num_images: imageCount,
-        session_id: currentSession.id,
-        loras: selectedLoras.length > 0
-          ? selectedLoras.map(l => ({ lora_id: l.id, weight: l.weight }))
-          : undefined,
-        reference_images,
-        strength: reference_images ? strength : undefined,
-      })
-
-      // Fetch the job details and track it by job ID
-      const job = await api.getJob(response.job_id)
-      setActiveJobs(prev => ({ ...prev, [job.id]: job }))
-
-      // Scroll to bottom to show the generation card
-      setTimeout(() => {
-        feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' })
-      }, 100)
-    } catch (err) {
-      console.error('Failed to create job:', err)
-      toast({ title: 'Generation failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
-    } finally {
-      setIsSubmitting(false)
+    // Create optimistic job entry immediately
+    const optimisticJob: Job = {
+      id: tempId,
+      session_id: currentSession.id,
+      status: 'submitting',
+      progress: 0,
+      current_image: 0,
+      total_images: imageCount,
+      eta_seconds: null,
+      error: null,
+      download_progress: 0,
+      download_total_mb: null,
+      download_speed_mbps: null,
+      load_progress: 0,
+      prompt: fullPrompt,
+      model: selectedModel,
+      width: selectedAspect.width,
+      height: selectedAspect.height,
+      steps: 20,
+      num_images: imageCount,
+      source_image_urls: [],
+      strength: referenceImages.length > 0 ? strength : null,
+      batch_id: null,
+      images: [],
+      created_at: new Date().toISOString(),
+      started_at: null,
+      completed_at: null,
     }
+
+    // Show the job immediately
+    setActiveJobs(prev => ({ ...prev, [tempId]: optimisticJob }))
+    setIsSubmitting(false)
+
+    // Scroll to bottom to show the generation card
+    setTimeout(() => {
+      feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' })
+    }, 100)
+
+    // Fire the API call in the background
+    ;(async () => {
+      try {
+        // Build reference_images array if any
+        let reference_images: { image_base64: string }[] | undefined
+        if (referenceImages.length > 0) {
+          reference_images = []
+          for (const ref of referenceImages) {
+            // Use preview directly if file is empty (restored from session)
+            // or convert file to base64 for newly uploaded images
+            let base64: string
+            if (ref.file.size === 0 && ref.preview) {
+              // Restored reference image - use preview directly
+              base64 = ref.preview
+            } else {
+              // Newly uploaded image - convert file to base64
+              base64 = await fileToBase64(ref.file)
+            }
+            reference_images.push({ image_base64: base64 })
+          }
+        }
+
+        const response = await api.createJob({
+          prompt: fullPrompt,
+          model: selectedModel,
+          width: selectedAspect.width,
+          height: selectedAspect.height,
+          num_images: imageCount,
+          session_id: currentSession.id,
+          loras: selectedLoras.length > 0
+            ? selectedLoras.map(l => ({ lora_id: l.id, weight: l.weight }))
+            : undefined,
+          reference_images,
+          strength: reference_images ? strength : undefined,
+        })
+
+        // Fetch the real job and replace the optimistic one
+        const job = await api.getJob(response.job_id)
+        setActiveJobs(prev => {
+          const { [tempId]: _, ...rest } = prev
+          return { ...rest, [job.id]: job }
+        })
+      } catch (err) {
+        console.error('Failed to create job:', err)
+        // Remove the optimistic job on failure
+        setActiveJobs(prev => {
+          const { [tempId]: _, ...rest } = prev
+          return rest
+        })
+        toast({ title: 'Generation failed', description: err instanceof Error ? err.message : 'Unknown error', variant: 'destructive' })
+      }
+    })()
   }
 
   // Get the first active job for a session (for backwards compatibility)
@@ -498,14 +650,24 @@ export function ImagePage() {
   const canQueueMore = activeJobCount < 10
 
   const handleNewSession = () => {
-    // Save current prompt as draft before switching
+    // Save current prompt, reference images, and settings before switching
     if (currentSession) {
       setSessionDrafts(prev => ({ ...prev, [currentSession.id]: prompt }))
+      setSessionRefImages(prev => ({ ...prev, [currentSession.id]: referenceImages.map(r => r.preview) }))
+      setSessionSettings(prev => ({ ...prev, [currentSession.id]: {
+        model: selectedModel,
+        style: selectedStyle,
+        strength,
+        aspectRatio,
+        imageCount,
+      }}))
     }
     const session = createSession()
     setSessions(getSessions())
     setCurrentSession(session)
     setPrompt('')  // New session starts with empty prompt
+    setReferenceImages([])  // New session starts with no reference images
+    // New session inherits current settings (don't reset them)
     // Push new session to URL (creates history entry)
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
@@ -517,15 +679,43 @@ export function ImagePage() {
   const handleSwitchSession = (sessionId: string) => {
     const session = sessions.find(s => s.id === sessionId)
     if (!session) return
-    // Save current prompt as draft for current session
+    // Save current prompt, reference images, and settings for current session
     if (currentSession) {
       setSessionDrafts(prev => ({ ...prev, [currentSession.id]: prompt }))
+      setSessionRefImages(prev => ({ ...prev, [currentSession.id]: referenceImages.map(r => r.preview) }))
+      setSessionSettings(prev => ({ ...prev, [currentSession.id]: {
+        model: selectedModel,
+        style: selectedStyle,
+        strength,
+        aspectRatio,
+        imageCount,
+      }}))
     }
     // Switch to new session
     setCurrentSessionId(session.id)
     setCurrentSession(session)
     // Restore draft for new session
     setPrompt(sessionDrafts[session.id] || '')
+    // Restore reference images for new session
+    const savedPreviews = sessionRefImages[session.id] || []
+    if (savedPreviews.length > 0) {
+      const restoredRefs = savedPreviews.map((preview, i) => ({
+        file: new File([], `restored-${i}.png`, { type: 'image/png' }),
+        preview,
+      }))
+      setReferenceImages(restoredRefs)
+    } else {
+      setReferenceImages([])
+    }
+    // Restore settings for new session
+    const savedSettings = sessionSettings[session.id]
+    if (savedSettings) {
+      setSelectedModel(savedSettings.model)
+      setSelectedStyle(savedSettings.style)
+      setStrength(savedSettings.strength)
+      setAspectRatio(savedSettings.aspectRatio)
+      setImageCount(savedSettings.imageCount)
+    }
     // Push session to URL (creates history entry)
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
@@ -536,8 +726,18 @@ export function ImagePage() {
 
   const handleDeleteSession = (id: string) => {
     deleteSession(id)
-    // Clean up draft for deleted session
+    // Clean up draft, reference images, and settings for deleted session
     setSessionDrafts(prev => {
+      const updated = { ...prev }
+      delete updated[id]
+      return updated
+    })
+    setSessionRefImages(prev => {
+      const updated = { ...prev }
+      delete updated[id]
+      return updated
+    })
+    setSessionSettings(prev => {
       const updated = { ...prev }
       delete updated[id]
       return updated
@@ -547,9 +747,27 @@ export function ImagePage() {
     if (newCurrentId) {
       const newSession = getSessions().find(s => s.id === newCurrentId)
       setCurrentSession(newSession || null)
-      // Restore draft for new current session
+      // Restore draft, reference images, and settings for new current session
       if (newSession) {
         setPrompt(sessionDrafts[newSession.id] || '')
+        const savedPreviews = sessionRefImages[newSession.id] || []
+        if (savedPreviews.length > 0) {
+          const restoredRefs = savedPreviews.map((preview, i) => ({
+            file: new File([], `restored-${i}.png`, { type: 'image/png' }),
+            preview,
+          }))
+          setReferenceImages(restoredRefs)
+        } else {
+          setReferenceImages([])
+        }
+        const savedSettings = sessionSettings[newSession.id]
+        if (savedSettings) {
+          setSelectedModel(savedSettings.model)
+          setSelectedStyle(savedSettings.style)
+          setStrength(savedSettings.strength)
+          setAspectRatio(savedSettings.aspectRatio)
+          setImageCount(savedSettings.imageCount)
+        }
       }
     }
   }
@@ -640,7 +858,9 @@ export function ImagePage() {
                   <div className="flex items-center gap-1.5 mt-0.5">
                     <Loader2 className="h-3 w-3 animate-spin text-primary" />
                     <span className="text-xs text-primary">
-                      {sessionJob.status === 'downloading'
+                      {sessionJob.status === 'submitting'
+                        ? 'Submitting...'
+                        : sessionJob.status === 'downloading'
                         ? `Downloading ${Math.round(sessionJob.download_progress)}%`
                         : sessionJob.status === 'loading_model'
                         ? 'Loading...'
@@ -867,9 +1087,11 @@ export function ImagePage() {
                 downloadProgress={job.download_progress}
                 downloadTotalMb={job.download_total_mb}
                 downloadSpeedMbps={job.download_speed_mbps}
+                loadProgress={job.load_progress}
                 etaSeconds={job.eta_seconds}
                 model={job.model}
                 statusLabel={
+                  job.status === 'submitting' ? 'Submitting' :
                   job.status === 'queued' ? 'Queued' :
                   job.status === 'downloading' ? 'Downloading model' :
                   job.status === 'loading_model' ? 'Loading model' :

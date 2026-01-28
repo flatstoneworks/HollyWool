@@ -14,6 +14,7 @@ from typing import Optional
 from PIL import Image
 
 from ..models.schemas import I2VJob, VideoResult, JobStatus, I2VGenerateRequest
+from ..utils.paths import get_output_dir
 from .inference import get_inference_service
 from .base_job_manager import BaseJobManager
 
@@ -56,9 +57,7 @@ class I2VJobManager(BaseJobManager[I2VJob]):
 
     def _save_source_image(self, image: Image.Image, job_id: str, index: int = 0) -> str:
         """Save a source image and return its URL."""
-        output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
-        output_dir.mkdir(parents=True, exist_ok=True)
-
+        output_dir = get_output_dir()
         image_path = output_dir / f"{job_id}_source_{index}.png"
         image.save(image_path, "PNG")
         return f"/outputs/{job_id}_source_{index}.png"
@@ -69,7 +68,7 @@ class I2VJobManager(BaseJobManager[I2VJob]):
         Supports the new reference_images array and falls back to legacy
         image_base64/image_asset_id fields for backward compatibility.
         """
-        output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
+        output_dir = get_output_dir()
         images = []
         urls = []
 
@@ -140,6 +139,9 @@ class I2VJobManager(BaseJobManager[I2VJob]):
         steps = request.steps if request.steps else model_config["default_steps"]
         num_frames = request.num_frames if request.num_frames else model_config.get("default_num_frames", 49)
         fps = request.fps if request.fps else model_config.get("default_fps", 8)
+        # Use config defaults for width/height if model specifies them
+        width = model_config.get("default_width", request.width)
+        height = model_config.get("default_height", request.height)
 
         job_id = str(uuid.uuid4())
 
@@ -156,8 +158,8 @@ class I2VJobManager(BaseJobManager[I2VJob]):
             prompt=request.prompt,
             model=request.model,
             source_image_urls=source_urls,
-            width=request.width,
-            height=request.height,
+            width=width,
+            height=height,
             steps=steps,
             num_frames=num_frames,
             fps=fps,
@@ -196,7 +198,7 @@ class I2VJobManager(BaseJobManager[I2VJob]):
             images = self._pending_images.pop(job_id, None)
             if images is None:
                 # Try to reload from saved source files
-                output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
+                output_dir = get_output_dir()
                 images = []
                 for url in job.source_image_urls:
                     source_path = output_dir / url.split("/")[-1]
@@ -210,6 +212,10 @@ class I2VJobManager(BaseJobManager[I2VJob]):
 
             # Check if model needs downloading
             needs_download = not service.is_model_cached(job.model)
+
+            # Load progress callback
+            def load_progress_callback(progress_pct: float):
+                self._update_job(job_id, load_progress=progress_pct)
 
             if needs_download:
                 # Update to downloading status
@@ -226,24 +232,24 @@ class I2VJobManager(BaseJobManager[I2VJob]):
                                    download_speed_mbps=speed_mbps)
 
                 # Load model with download tracking
-                self._update_job(job_id, status=JobStatus.LOADING_MODEL)
-                service.load_model(job.model, download_callback=download_progress_callback)
+                self._update_job(job_id, status=JobStatus.LOADING_MODEL, load_progress=0)
+                service.load_model(job.model, download_callback=download_progress_callback, load_progress_callback=load_progress_callback)
             else:
                 # Update to loading model status
                 self._update_job(job_id,
                                status=JobStatus.LOADING_MODEL,
-                               started_at=datetime.utcnow())
+                               started_at=datetime.utcnow(),
+                               load_progress=0)
 
-                # Load model if needed (no download)
-                service.load_model(job.model)
+                # Load model if needed (no download) with progress tracking
+                service.load_model(job.model, load_progress_callback=load_progress_callback)
 
             # Update to generating status
             self._update_job(job_id,
                            status=JobStatus.GENERATING,
                            progress=10.0)
 
-            output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            output_dir = get_output_dir()
 
             # Generate video from image
             asset_id = str(uuid.uuid4())

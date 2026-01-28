@@ -1,15 +1,18 @@
 import json
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from ..models.schemas import AssetMetadata, AssetListResponse, VideoAssetMetadata, VideoAssetListResponse
+from ..utils.paths import get_output_dir, get_data_dir
 
 router = APIRouter(prefix="/api", tags=["assets"])
+logger = logging.getLogger(__name__)
 
 
 # Session models
@@ -43,9 +46,7 @@ class VideoSessionsData(BaseModel):
 
 def get_sessions_file() -> Path:
     """Get the path to the sessions JSON file."""
-    data_dir = Path(__file__).parent.parent.parent.parent / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir / "sessions.json"
+    return get_data_dir() / "sessions.json"
 
 
 def load_sessions() -> SessionsData:
@@ -56,8 +57,12 @@ def load_sessions() -> SessionsData:
             with open(sessions_file, "r") as f:
                 data = json.load(f)
                 return SessionsData(**data)
-        except Exception:
-            pass
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse sessions file: {e}")
+        except ValidationError as e:
+            logger.warning(f"Invalid sessions data structure: {e}")
+        except OSError as e:
+            logger.error(f"Failed to read sessions file: {e}")
     return SessionsData(sessions=[], currentSessionId=None)
 
 
@@ -68,16 +73,14 @@ def save_sessions(data: SessionsData) -> None:
         json.dump(data.model_dump(), f, indent=2)
 
 
-def get_output_dir() -> Path:
-    output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir
-
-
 def load_asset_metadata(metadata_path: Path) -> Optional[AssetMetadata]:
+    """Load asset metadata from JSON file."""
     try:
         with open(metadata_path, "r") as f:
             data = json.load(f)
+            # Skip video assets in image metadata loader
+            if data.get("type") == "video":
+                return None
             data["url"] = f"/outputs/{data['filename']}"
             data["created_at"] = datetime.fromisoformat(data["created_at"])
 
@@ -89,8 +92,15 @@ def load_asset_metadata(metadata_path: Path) -> Optional[AssetMetadata]:
                 data["file_path"] = str(image_path.resolve())
 
             return AssetMetadata(**data)
-    except Exception:
-        return None
+    except json.JSONDecodeError as e:
+        logger.warning(f"Failed to parse asset metadata {metadata_path}: {e}")
+    except KeyError as e:
+        logger.warning(f"Missing required field in {metadata_path}: {e}")
+    except ValidationError as e:
+        logger.warning(f"Invalid asset metadata in {metadata_path}: {e}")
+    except OSError as e:
+        logger.error(f"Failed to read asset metadata {metadata_path}: {e}")
+    return None
 
 
 @router.get("/assets", response_model=AssetListResponse)
@@ -153,8 +163,8 @@ async def delete_asset(asset_id: str):
             data = json.load(f)
             if "filename" in data:
                 image_path = output_dir / data["filename"]
-    except Exception:
-        pass
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(f"Failed to read metadata for deletion {metadata_path}: {e}")
 
     # Fallback: try common extensions if metadata didn't resolve the file
     if image_path is None or not image_path.exists():
@@ -187,12 +197,25 @@ async def save_sessions_endpoint(data: SessionsData):
     return data
 
 
+# Bulk session models
+class BulkSession(BaseModel):
+    id: str
+    name: str
+    createdAt: str
+    bulkJobIds: List[str] = []
+    thumbnail: Optional[str] = None
+    isAutoNamed: Optional[bool] = None
+
+
+class BulkSessionsData(BaseModel):
+    sessions: List[BulkSession]
+    currentSessionId: Optional[str] = None
+
+
 # Video session functions
 def get_video_sessions_file() -> Path:
     """Get the path to the video sessions JSON file."""
-    data_dir = Path(__file__).parent.parent.parent.parent / "data"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir / "video-sessions.json"
+    return get_data_dir() / "video-sessions.json"
 
 
 def load_video_sessions() -> VideoSessionsData:
@@ -203,8 +226,12 @@ def load_video_sessions() -> VideoSessionsData:
             with open(sessions_file, "r") as f:
                 data = json.load(f)
                 return VideoSessionsData(**data)
-        except Exception:
-            pass
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse video sessions file: {e}")
+        except ValidationError as e:
+            logger.warning(f"Invalid video sessions data structure: {e}")
+        except OSError as e:
+            logger.error(f"Failed to read video sessions file: {e}")
     return VideoSessionsData(sessions=[], currentSessionId=None)
 
 
@@ -249,8 +276,15 @@ def load_video_asset_metadata(metadata_path: Path) -> Optional[VideoAssetMetadat
                 data["file_path"] = str(video_path.resolve())
 
             return VideoAssetMetadata(**data)
-    except Exception:
-        return None
+    except json.JSONDecodeError as e:
+        logger.warning(f"Failed to parse video metadata {metadata_path}: {e}")
+    except KeyError as e:
+        logger.warning(f"Missing required field in {metadata_path}: {e}")
+    except ValidationError as e:
+        logger.warning(f"Invalid video metadata in {metadata_path}: {e}")
+    except OSError as e:
+        logger.error(f"Failed to read video metadata {metadata_path}: {e}")
+    return None
 
 
 @router.get("/video-assets", response_model=VideoAssetListResponse)
@@ -317,3 +351,47 @@ async def delete_video_asset(asset_id: str):
         metadata_path.unlink()
 
     return {"status": "deleted", "id": asset_id}
+
+
+# Bulk session functions
+def get_bulk_sessions_file() -> Path:
+    """Get the path to the bulk sessions JSON file."""
+    return get_data_dir() / "bulk-sessions.json"
+
+
+def load_bulk_sessions() -> BulkSessionsData:
+    """Load bulk sessions from file."""
+    sessions_file = get_bulk_sessions_file()
+    if sessions_file.exists():
+        try:
+            with open(sessions_file, "r") as f:
+                data = json.load(f)
+                return BulkSessionsData(**data)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse bulk sessions file: {e}")
+        except ValidationError as e:
+            logger.warning(f"Invalid bulk sessions data structure: {e}")
+        except OSError as e:
+            logger.error(f"Failed to read bulk sessions file: {e}")
+    return BulkSessionsData(sessions=[], currentSessionId=None)
+
+
+def save_bulk_sessions(data: BulkSessionsData) -> None:
+    """Save bulk sessions to file."""
+    sessions_file = get_bulk_sessions_file()
+    with open(sessions_file, "w") as f:
+        json.dump(data.model_dump(), f, indent=2)
+
+
+# Bulk session endpoints
+@router.get("/bulk-sessions", response_model=BulkSessionsData)
+async def get_bulk_sessions():
+    """Get all bulk sessions."""
+    return load_bulk_sessions()
+
+
+@router.post("/bulk-sessions", response_model=BulkSessionsData)
+async def save_bulk_sessions_endpoint(data: BulkSessionsData):
+    """Save all bulk sessions."""
+    save_bulk_sessions(data)
+    return data

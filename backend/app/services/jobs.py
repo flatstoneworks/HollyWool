@@ -9,6 +9,7 @@ from typing import Optional
 from PIL import Image
 
 from ..models.schemas import Job, JobStatus, ImageResult, GenerateRequest
+from ..utils.paths import get_output_dir
 from .inference import get_inference_service
 from .base_job_manager import BaseJobManager
 
@@ -57,15 +58,14 @@ class JobManager(BaseJobManager[Job]):
 
     def _save_source_image(self, image: Image.Image, job_id: str, index: int) -> str:
         """Save a source image and return its URL."""
-        output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
-        output_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = get_output_dir()
         image_path = output_dir / f"{job_id}_source_{index}.png"
         image.save(image_path, "PNG")
         return f"/outputs/{job_id}_source_{index}.png"
 
     def _load_reference_images(self, request: GenerateRequest, job_id: str) -> tuple[list, list[str]]:
         """Load reference images from request and return (list[PIL.Image], list[str urls])."""
-        output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
+        output_dir = get_output_dir()
         images = []
         urls = []
 
@@ -158,6 +158,10 @@ class JobManager(BaseJobManager[Job]):
             # Check if model needs downloading
             needs_download = not service.is_model_cached(job.model)
 
+            # Load progress callback
+            def load_progress_callback(progress_pct: float):
+                self._update_job(job_id, load_progress=progress_pct)
+
             if needs_download:
                 # Update to downloading status
                 self._update_job(job_id,
@@ -173,16 +177,17 @@ class JobManager(BaseJobManager[Job]):
                                    download_speed_mbps=speed_mbps)
 
                 # Load model with download tracking
-                self._update_job(job_id, status=JobStatus.LOADING_MODEL)
-                service.load_model(job.model, download_callback=download_progress_callback)
+                self._update_job(job_id, status=JobStatus.LOADING_MODEL, load_progress=0)
+                service.load_model(job.model, download_callback=download_progress_callback, load_progress_callback=load_progress_callback)
             else:
                 # Update to loading model status
                 self._update_job(job_id,
                                status=JobStatus.LOADING_MODEL,
-                               started_at=datetime.utcnow())
+                               started_at=datetime.utcnow(),
+                               load_progress=0)
 
-                # Load model if needed (no download)
-                service.load_model(job.model)
+                # Load model if needed (no download) with progress tracking
+                service.load_model(job.model, load_progress_callback=load_progress_callback)
 
             # Get actual values
             guidance = model_config["default_guidance"]
@@ -190,8 +195,7 @@ class JobManager(BaseJobManager[Job]):
             # Generate base seed
             base_seed = random.randint(0, 2**32 - 1)
 
-            output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
-            output_dir.mkdir(parents=True, exist_ok=True)
+            output_dir = get_output_dir()
 
             images_results = []
 

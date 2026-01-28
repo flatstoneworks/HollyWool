@@ -217,14 +217,17 @@ models:
     name: "Wan2.2 T2V"
     path: "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
     type: "wan"
-    default_steps: 50
+    default_steps: 30
     default_guidance: 5.0
-    default_num_frames: 81
+    default_num_frames: 49
     default_fps: 16
+    default_width: 480
+    default_height: 320
     category: "video"
-    description: "High-quality text-to-video from Wan2.2 MoE architecture"
+    description: "High-quality text-to-video from Wan2.2 MoE architecture (480p)"
     tags: ["video", "text-to-video", "quality"]
-    size_gb: 28
+    size_gb: 126
+    memory_gb: 80
     requires_approval: false
 
   mochi-1:
@@ -260,14 +263,17 @@ models:
     name: "Wan2.2 I2V"
     path: "Wan-AI/Wan2.2-I2V-A14B-Diffusers"
     type: "wan-i2v"
-    default_steps: 50
+    default_steps: 30
     default_guidance: 5.0
-    default_num_frames: 81
+    default_num_frames: 49
     default_fps: 16
+    default_width: 480
+    default_height: 320
     category: "video"
-    description: "Animate images into video with Wan2.2 MoE architecture"
+    description: "Animate images into video with Wan2.2 MoE architecture (480p)"
     tags: ["video", "image-to-video", "quality"]
-    size_gb: 28
+    size_gb: 126
+    memory_gb: 80
     requires_approval: false
 
   svd-xt:

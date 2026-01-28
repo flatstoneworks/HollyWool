@@ -48,8 +48,12 @@ from huggingface_hub import snapshot_download, HfFileSystem
 from PIL import Image
 
 
+from ..utils.paths import get_data_dir
+
 # Download progress callback type
 DownloadCallback = Callable[[float, float, float], None]  # (progress_pct, total_mb, speed_mbps)
+# Load progress callback type
+LoadProgressCallback = Callable[[float], None]  # (progress_pct)
 
 
 class InferenceService:
@@ -82,7 +86,7 @@ class InferenceService:
             return yaml.safe_load(f)
 
     def _load_civitai_models(self) -> dict:
-        registry_file = Path(__file__).parent.parent.parent.parent / "data" / "civitai-models.json"
+        registry_file = get_data_dir() / "civitai-models.json"
         if registry_file.exists():
             try:
                 import json
@@ -141,7 +145,13 @@ class InferenceService:
         return self.civitai_models.get(model_id)
 
     def is_model_cached(self, model_id: str) -> bool:
-        """Check if a model is already downloaded/cached."""
+        """Check if a model is already downloaded/cached.
+
+        Verifies both that key metadata exists AND that no blob files are
+        still mid-download (.incomplete), which would cause from_pretrained()
+        to silently attempt a network download during what should be a
+        local-only model load.
+        """
         model_config = self.get_model_config(model_id)
         if not model_config:
             return False
@@ -152,12 +162,24 @@ class InferenceService:
 
         model_path = model_config["path"]
 
-        # Try loading with local_files_only to check if cached
         try:
             from huggingface_hub import try_to_load_from_cache
+            from huggingface_hub.constants import HF_HUB_CACHE
+
             # Check for a key file that indicates the model is downloaded
             result = try_to_load_from_cache(model_path, "model_index.json")
-            return result is not None
+            if result is None:
+                return False
+
+            # Check that no blob files are still being downloaded.
+            # HF cache layout: {HF_HUB_CACHE}/models--{org}--{name}/blobs/
+            # Incomplete downloads have a .incomplete suffix.
+            repo_folder = f"models--{model_path.replace('/', '--')}"
+            blobs_dir = Path(HF_HUB_CACHE) / repo_folder / "blobs"
+            if blobs_dir.exists() and any(blobs_dir.glob("*.incomplete")):
+                return False
+
+            return True
         except Exception:
             return False
 
@@ -233,8 +255,16 @@ class InferenceService:
             print(f"Failed to download model {model_id}: {e}")
             raise
 
-    def load_model(self, model_id: str, download_callback: Optional[DownloadCallback] = None) -> None:
+    def load_model(
+        self,
+        model_id: str,
+        download_callback: Optional[DownloadCallback] = None,
+        load_progress_callback: Optional[LoadProgressCallback] = None,
+    ) -> None:
         if self.current_model_id == model_id and self.pipeline is not None:
+            # Already loaded - report 100%
+            if load_progress_callback:
+                load_progress_callback(100.0)
             return
 
         model_config = self.get_model_config(model_id)
@@ -249,7 +279,21 @@ class InferenceService:
             print(f"Model not cached, downloading: {model_config['name']}")
             self.download_model(model_id, download_callback)
 
+        # Verify cache is complete — fail fast if download left incomplete files
+        if not model_config.get("single_file") and not self.is_model_cached(model_id):
+            raise RuntimeError(
+                f"Model '{model_config['name']}' has incomplete files in the HuggingFace cache. "
+                f"Delete the cache directory and re-download, or download from the Models page."
+            )
+
         print(f"Loading model: {model_config['name']} ({model_path})")
+
+        # Start GPU memory monitoring for load progress
+        from ..utils.gpu_monitor import GPULoadMonitor
+        monitor = None
+        if load_progress_callback:
+            monitor = GPULoadMonitor(model_type, load_progress_callback)
+            monitor.start()
 
         # Load the new pipeline first before clearing the old one
         is_single_file = model_config.get("single_file", False)
@@ -286,6 +330,7 @@ class InferenceService:
                 new_pipeline = FluxPipeline.from_pretrained(
                     model_path,
                     torch_dtype=self.dtype,
+                    local_files_only=True,
                 )
             elif model_type == "sdxl":
                 new_pipeline = StableDiffusionXLPipeline.from_pretrained(
@@ -293,23 +338,27 @@ class InferenceService:
                     torch_dtype=self.dtype,
                     use_safetensors=True,
                     variant="fp16" if self.device == "cuda" else None,
+                    local_files_only=True,
                 )
             elif model_type == "sd3":
                 new_pipeline = StableDiffusion3Pipeline.from_pretrained(
                     model_path,
                     torch_dtype=self.dtype,
                     use_safetensors=True,
+                    local_files_only=True,
                 )
             elif model_type == "sd":
                 new_pipeline = AutoPipelineForText2Image.from_pretrained(
                     model_path,
                     torch_dtype=self.dtype,
                     use_safetensors=True,
+                    local_files_only=True,
                 )
             elif model_type == "video":
                 new_pipeline = CogVideoXPipeline.from_pretrained(
                     model_path,
                     torch_dtype=self.dtype,
+                    local_files_only=True,
                 )
             elif model_type == "ltx2":
                 if not LTX2_AVAILABLE:
@@ -320,11 +369,13 @@ class InferenceService:
                 new_pipeline = LTX2Pipeline.from_pretrained(
                     model_path,
                     torch_dtype=torch.bfloat16,
+                    local_files_only=True,
                 )
             elif model_type == "video-i2v":
                 new_pipeline = CogVideoXImageToVideoPipeline.from_pretrained(
                     model_path,
                     torch_dtype=self.dtype,
+                    local_files_only=True,
                 )
             elif model_type == "svd":
                 # SVD requires float16, not bfloat16 (numpy doesn't support bfloat16)
@@ -333,6 +384,7 @@ class InferenceService:
                     model_path,
                     torch_dtype=svd_dtype,
                     variant="fp16" if self.device == "cuda" else None,
+                    local_files_only=True,
                 )
             elif model_type == "wan":
                 if not WAN_AVAILABLE:
@@ -342,10 +394,12 @@ class InferenceService:
                     )
                 # Float32 VAE is critical — bfloat16 causes visible color banding
                 vae = AutoencoderKLWan.from_pretrained(
-                    model_path, subfolder="vae", torch_dtype=torch.float32
+                    model_path, subfolder="vae", torch_dtype=torch.float32,
+                    local_files_only=True,
                 )
                 new_pipeline = WanPipeline.from_pretrained(
-                    model_path, vae=vae, torch_dtype=torch.bfloat16
+                    model_path, vae=vae, torch_dtype=torch.bfloat16,
+                    local_files_only=True,
                 )
             elif model_type == "wan-i2v":
                 if not WAN_AVAILABLE:
@@ -355,10 +409,12 @@ class InferenceService:
                     )
                 # Float32 VAE is critical — bfloat16 causes visible color banding
                 vae = AutoencoderKLWan.from_pretrained(
-                    model_path, subfolder="vae", torch_dtype=torch.float32
+                    model_path, subfolder="vae", torch_dtype=torch.float32,
+                    local_files_only=True,
                 )
                 new_pipeline = WanImageToVideoPipeline.from_pretrained(
-                    model_path, vae=vae, torch_dtype=torch.bfloat16
+                    model_path, vae=vae, torch_dtype=torch.bfloat16,
+                    local_files_only=True,
                 )
             elif model_type == "mochi":
                 if not MOCHI_AVAILABLE:
@@ -367,11 +423,15 @@ class InferenceService:
                         "Install with: pip install -U diffusers"
                     )
                 new_pipeline = MochiPipeline.from_pretrained(
-                    model_path, variant="bf16", torch_dtype=torch.bfloat16
+                    model_path, variant="bf16", torch_dtype=torch.bfloat16,
+                    local_files_only=True,
                 )
             else:
                 raise ValueError(f"Unknown model type: {model_type}")
         except Exception as e:
+            # Stop monitor on error
+            if monitor:
+                monitor.stop()
             print(f"Failed to load model {model_id}: {e}")
             raise
 
@@ -385,9 +445,14 @@ class InferenceService:
 
         # Memory optimization: Wan/Mochi use cpu_offload (mutually exclusive with .to(device))
         if model_type in ("wan", "wan-i2v", "mochi"):
-            self.pipeline.enable_model_cpu_offload()
-            if model_type == "mochi":
+            # Use sequential CPU offload for large models - more aggressive memory saving
+            self.pipeline.enable_sequential_cpu_offload()
+            # Enable VAE tiling for video models to reduce memory during decoding
+            if hasattr(self.pipeline, 'enable_vae_tiling'):
                 self.pipeline.enable_vae_tiling()
+            # Enable VAE slicing if available
+            if hasattr(self.pipeline, 'enable_vae_slicing'):
+                self.pipeline.enable_vae_slicing()
         else:
             self.pipeline.to(self.device)
             # Enable memory optimizations
@@ -395,6 +460,11 @@ class InferenceService:
                 self.pipeline.enable_attention_slicing()
 
         self.current_model_id = model_id
+
+        # Stop GPU monitoring and report 100% complete
+        if monitor:
+            monitor.stop()
+
         print(f"Model loaded successfully: {model_id}")
 
     def generate(

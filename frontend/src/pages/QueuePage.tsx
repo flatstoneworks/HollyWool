@@ -1,151 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
-import { ListOrdered, Loader2, Image as ImageIcon, Film, Wand2, ArrowUpCircle, Download } from 'lucide-react'
+import { ListOrdered, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import {
-  api,
-  type Job,
-  type VideoJob,
-  type I2VJob,
-  type UpscaleJob,
-  type CivitaiDownloadJob,
-} from '@/api/client'
-
-// Unified queue item shape
-interface QueueItem {
-  id: string
-  type: 'image' | 'video' | 'i2v' | 'upscale' | 'download'
-  status: string
-  progress: number
-  model: string
-  prompt: string
-  eta_seconds: number | null
-  created_at: string
-  width?: number
-  height?: number
-  steps?: number
-  num_frames?: number
-  fps?: number
-  source_image_urls?: string[]
-  download_progress?: number
-  download_total_mb?: number | null
-  download_speed_mbps?: number | null
-}
-
-const TYPE_CONFIG: Record<QueueItem['type'], { label: string; color: string; icon: typeof ImageIcon }> = {
-  image:    { label: 'Image',    color: 'bg-blue-500/20 text-blue-400',   icon: ImageIcon },
-  video:    { label: 'Video',    color: 'bg-purple-500/20 text-purple-400', icon: Film },
-  i2v:      { label: 'I2V',      color: 'bg-green-500/20 text-green-400',  icon: Wand2 },
-  upscale:  { label: 'Upscale',  color: 'bg-orange-500/20 text-orange-400', icon: ArrowUpCircle },
-  download: { label: 'Download', color: 'bg-cyan-500/20 text-cyan-400',   icon: Download },
-}
-
-function getStatusLabel(status: string): string {
-  switch (status) {
-    case 'queued': return 'Queued \u2014 waiting to start'
-    case 'downloading': return 'Downloading model'
-    case 'loading_model': return 'Loading model into GPU'
-    case 'generating': return 'Generating'
-    case 'saving': return 'Encoding & saving'
-    default: return status
-  }
-}
-
-function normalizeImageJob(job: Job): QueueItem {
-  return {
-    id: job.id,
-    type: 'image',
-    status: job.status,
-    progress: job.status === 'downloading' ? job.download_progress : job.progress,
-    model: job.model,
-    prompt: job.prompt,
-    eta_seconds: job.eta_seconds,
-    created_at: job.created_at,
-    width: job.width,
-    height: job.height,
-    steps: job.steps,
-    source_image_urls: job.source_image_urls,
-    download_progress: job.download_progress,
-    download_total_mb: job.download_total_mb,
-    download_speed_mbps: job.download_speed_mbps,
-  }
-}
-
-function normalizeVideoJob(job: VideoJob): QueueItem {
-  return {
-    id: job.id,
-    type: 'video',
-    status: job.status,
-    progress: job.status === 'downloading' ? job.download_progress : job.progress,
-    model: job.model,
-    prompt: job.prompt,
-    eta_seconds: job.eta_seconds,
-    created_at: job.created_at,
-    width: job.width,
-    height: job.height,
-    steps: job.steps,
-    num_frames: job.num_frames,
-    fps: job.fps,
-    download_progress: job.download_progress,
-    download_total_mb: job.download_total_mb,
-    download_speed_mbps: job.download_speed_mbps,
-  }
-}
-
-function normalizeI2VJob(job: I2VJob): QueueItem {
-  return {
-    id: job.id,
-    type: 'i2v',
-    status: job.status,
-    progress: job.status === 'downloading' ? job.download_progress : job.progress,
-    model: job.model,
-    prompt: job.prompt,
-    eta_seconds: job.eta_seconds,
-    created_at: job.created_at,
-    width: job.width,
-    height: job.height,
-    steps: job.steps,
-    num_frames: job.num_frames,
-    fps: job.fps,
-    source_image_urls: job.source_image_urls,
-    download_progress: job.download_progress,
-    download_total_mb: job.download_total_mb,
-    download_speed_mbps: job.download_speed_mbps,
-  }
-}
-
-function normalizeUpscaleJob(job: UpscaleJob): QueueItem {
-  return {
-    id: job.id,
-    type: 'upscale',
-    status: job.status,
-    progress: job.progress,
-    model: job.model,
-    prompt: `${job.source_width}x${job.source_height} \u2192 ${job.target_width}x${job.target_height} (${job.scale_factor}x)`,
-    eta_seconds: job.eta_seconds,
-    created_at: job.created_at,
-    width: job.target_width,
-    height: job.target_height,
-  }
-}
-
-function normalizeDownloadJob(job: CivitaiDownloadJob): QueueItem {
-  const totalMb = job.total_bytes > 0 ? job.total_bytes / (1024 * 1024) : (job.file_size_kb ? job.file_size_kb / 1024 : null)
-  const speedMbps = job.speed_bytes_per_sec > 0 ? job.speed_bytes_per_sec / (1024 * 1024) : null
-  return {
-    id: job.id,
-    type: 'download',
-    status: job.status,
-    progress: job.progress,
-    model: job.model_name,
-    prompt: job.filename,
-    eta_seconds: null,
-    created_at: job.created_at,
-    download_progress: job.progress,
-    download_total_mb: totalMb,
-    download_speed_mbps: speedMbps,
-  }
-}
+import { api } from '@/api/client'
+import { JOB_TYPES, getStatusLabel, type QueueItem } from '@/lib/job-types'
 
 export default function QueuePage() {
   const navigate = useNavigate()
@@ -180,50 +38,25 @@ export default function QueuePage() {
     refetchInterval: 3000,
   })
 
-  // Normalize all jobs into unified shape
-  const items: QueueItem[] = []
+  // Normalize all jobs into unified shape using registry
+  const queryResults = [imageJobs, videoJobs, i2vJobs, upscaleJobs, downloads]
 
-  if (imageJobs?.jobs) {
-    for (const job of imageJobs.jobs) {
-      if (!['completed', 'failed'].includes(job.status)) {
-        items.push(normalizeImageJob(job))
-      }
+  const items: QueueItem[] = []
+  JOB_TYPES.forEach((config, idx) => {
+    const data = queryResults[idx]
+    if (!data) return
+    const jobs = Array.isArray(data) ? data : (data as any).jobs ?? []
+    for (const job of jobs) {
+      if (config.isActive(job)) items.push(config.normalize(job))
     }
-  }
-  if (videoJobs?.jobs) {
-    for (const job of videoJobs.jobs) {
-      if (!['completed', 'failed'].includes(job.status)) {
-        items.push(normalizeVideoJob(job))
-      }
-    }
-  }
-  if (i2vJobs?.jobs) {
-    for (const job of i2vJobs.jobs) {
-      if (!['completed', 'failed'].includes(job.status)) {
-        items.push(normalizeI2VJob(job))
-      }
-    }
-  }
-  if (upscaleJobs?.jobs) {
-    for (const job of upscaleJobs.jobs) {
-      if (!['completed', 'failed'].includes(job.status)) {
-        items.push(normalizeUpscaleJob(job))
-      }
-    }
-  }
-  if (downloads) {
-    for (const job of downloads) {
-      if (['queued', 'downloading'].includes(job.status)) {
-        items.push(normalizeDownloadJob(job))
-      }
-    }
-  }
+  })
 
   // Sort by created_at ascending (oldest first = next to run)
   items.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
 
   const handleCardClick = (item: QueueItem) => {
-    if (['image', 'video', 'i2v'].includes(item.type)) {
+    const config = JOB_TYPES.find(c => c.type === item.type)
+    if (config?.isClickable) {
       navigate(`/job/${item.id}`)
     }
   }
@@ -251,9 +84,8 @@ export default function QueuePage() {
         ) : (
           <div className="p-4 space-y-3 max-w-3xl mx-auto">
             {items.map((item) => {
-              const config = TYPE_CONFIG[item.type]
+              const config = JOB_TYPES.find(c => c.type === item.type)!
               const TypeIcon = config.icon
-              const isClickable = ['image', 'video', 'i2v'].includes(item.type)
 
               const steps = item.type !== 'download' ? [
                 {
@@ -274,7 +106,7 @@ export default function QueuePage() {
                   onClick={() => handleCardClick(item)}
                   className={cn(
                     'rounded-xl border border-border bg-card overflow-hidden transition-colors',
-                    isClickable && 'cursor-pointer hover:border-primary/30'
+                    config.isClickable && 'cursor-pointer hover:border-primary/30'
                   )}
                 >
                   <div className="px-5 py-4">
@@ -284,7 +116,7 @@ export default function QueuePage() {
                         <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
                           <Loader2 className="h-3 w-3 animate-spin text-primary" />
                         </div>
-                        <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', config.color)}>
+                        <span className={cn('text-xs px-2 py-0.5 rounded-full font-medium', config.badgeColor)}>
                           <TypeIcon className="h-3 w-3 inline mr-1" />
                           {config.label}
                         </span>
@@ -365,7 +197,7 @@ export default function QueuePage() {
                   {/* Footer: details + prompt */}
                   <div className="px-5 py-3 border-t border-border">
                     {/* Source image thumbnail for I2V */}
-                    {item.type === 'i2v' && item.source_image_urls?.[0] && (
+                    {item.source_image_urls && item.source_image_urls.length > 0 && (
                       <div className="flex items-center gap-3 mb-2">
                         {item.source_image_urls.map((url, idx) => (
                           <img

@@ -30,9 +30,10 @@ async def create_video_job(request: VideoGenerateRequest):
         raise HTTPException(status_code=400, detail=f"Model {request.model} is not a video model")
 
     # Check system resources before accepting job
-    model_size_gb = model_config.get("size_gb", 12)  # Default to 12GB if not specified
+    # Use memory_gb (actual RAM) if available, otherwise fall back to size_gb (disk size)
+    model_memory_gb = model_config.get("memory_gb") or model_config.get("size_gb", 12)
     model_name = model_config.get("name", request.model)
-    resource_status = check_resources_for_video(model_size_gb, model_name)
+    resource_status = check_resources_for_video(model_memory_gb, model_name)
 
     if not resource_status.is_available:
         raise HTTPException(
@@ -42,7 +43,7 @@ async def create_video_job(request: VideoGenerateRequest):
                 "message": resource_status.rejection_reason,
                 "resources": {
                     "memory_available_gb": round(resource_status.memory_available_gb, 1),
-                    "memory_required_gb": round(model_size_gb + 5.0 + 10.0, 1),  # model + overhead + buffer
+                    "memory_required_gb": round(model_memory_gb + 5.0 + 10.0, 1),  # model + overhead + buffer
                     "gpu_utilization": resource_status.gpu_utilization,
                     "cpu_percent": round(resource_status.cpu_percent, 1),
                 }

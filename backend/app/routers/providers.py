@@ -10,6 +10,8 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from ..utils.paths import get_data_dir
+
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 logger = logging.getLogger(__name__)
 
@@ -37,9 +39,8 @@ KNOWN_PROVIDERS = {
     },
 }
 
-# Data directory: project_root/data/providers.json
-_DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
-_PROVIDERS_PATH = _DATA_DIR / "providers.json"
+# Providers file path
+_PROVIDERS_PATH = get_data_dir() / "providers.json"
 
 
 # ============================================================================

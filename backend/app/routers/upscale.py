@@ -10,14 +10,9 @@ from ..models.schemas import (
 )
 from ..services.upscale_jobs import get_upscale_job_manager
 from ..services.upscaler import get_upscaler_service
+from ..utils.paths import get_output_dir
 
 router = APIRouter(prefix="/api", tags=["upscale"])
-
-
-def get_output_dir() -> Path:
-    output_dir = Path(__file__).parent.parent.parent.parent / "outputs"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    return output_dir
 
 
 @router.get("/upscale/models", response_model=UpscaleModelsResponse)

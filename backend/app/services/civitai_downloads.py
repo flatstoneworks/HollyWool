@@ -15,6 +15,7 @@ from ..models.civitai_schemas import (
     CivitaiDownloadStatus,
 )
 from ..routers.settings import add_log, update_log, RequestLog
+from ..utils.paths import get_data_dir
 
 
 class CivitaiDownloadManager:
@@ -38,16 +39,11 @@ class CivitaiDownloadManager:
         self.worker_thread = threading.Thread(target=self._worker, daemon=True)
         self.worker_thread.start()
 
-    def _get_data_dir(self) -> Path:
-        data_dir = Path(__file__).parent.parent.parent.parent / "data"
-        data_dir.mkdir(parents=True, exist_ok=True)
-        return data_dir
-
     def _get_jobs_file(self) -> Path:
-        return self._get_data_dir() / "civitai-downloads.json"
+        return get_data_dir() / "civitai-downloads.json"
 
     def _get_models_registry_file(self) -> Path:
-        return self._get_data_dir() / "civitai-models.json"
+        return get_data_dir() / "civitai-models.json"
 
     def _load_jobs(self) -> None:
         jobs_file = self._get_jobs_file()

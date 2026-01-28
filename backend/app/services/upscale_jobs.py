@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..models.schemas import UpscaleJob, VideoResult, JobStatus, VideoUpscaleRequest
+from ..utils.paths import get_output_dir
 from .upscaler import get_upscaler_service
 from .base_job_manager import BaseJobManager
 
@@ -47,7 +48,7 @@ class UpscaleJobManager(BaseJobManager[UpscaleJob]):
 
     def _get_video_metadata(self, video_asset_id: str) -> Optional[dict]:
         """Load metadata for a video asset."""
-        outputs_dir = Path(__file__).parent.parent.parent.parent / "outputs"
+        outputs_dir = get_output_dir()
         metadata_path = outputs_dir / f"{video_asset_id}.json"
 
         if not metadata_path.exists():
@@ -135,7 +136,7 @@ class UpscaleJobManager(BaseJobManager[UpscaleJob]):
                            progress=5.0)
 
             # Setup paths
-            outputs_dir = Path(__file__).parent.parent.parent.parent / "outputs"
+            outputs_dir = get_output_dir()
             source_path = outputs_dir / f"{job.source_video_id}.mp4"
 
             if not source_path.exists():
