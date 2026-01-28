@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Bell, ImageIcon, Film, Loader2, X, ChevronRight,
+  Bell, ImageIcon, Film, Loader2, X,
   CheckCircle2, XCircle, Clock, Download
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -93,6 +93,24 @@ function formatTimeAgo(timestamp: number | null | undefined): string {
 export function NotificationsButton() {
   const navigate = useNavigate()
   const [isOpen, setIsOpen] = useState(false)
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('hollywool-dismissed-notifications')
+      return stored ? new Set(JSON.parse(stored)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
+
+  const dismissActivity = useCallback((e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
+    setDismissedIds(prev => {
+      const next = new Set(prev)
+      next.add(id)
+      localStorage.setItem('hollywool-dismissed-notifications', JSON.stringify([...next]))
+      return next
+    })
+  }, [])
 
   // Poll for image jobs
   const { data: imageJobsData } = useQuery({
@@ -182,8 +200,11 @@ export function NotificationsButton() {
     // Sort done by completion time (most recent first)
     done.sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0))
 
-    return { activeActivities: active, doneActivities: done.slice(0, 5) }
-  }, [imageJobsData, videoJobsData, downloadJobsData, hfDownloadJobsData])
+    return {
+      activeActivities: active.filter(a => !dismissedIds.has(a.id)),
+      doneActivities: done.filter(a => !dismissedIds.has(a.id)),
+    }
+  }, [imageJobsData, videoJobsData, downloadJobsData, hfDownloadJobsData, dismissedIds])
 
   const handleNavigateToJob = (activity: Activity) => {
     if (activity.status === 'failed') {
@@ -257,10 +278,10 @@ export function NotificationsButton() {
                       </div>
                       <div className="divide-y divide-border">
                         {activeActivities.map((activity) => (
-                          <button
+                          <div
                             key={activity.id}
                             onClick={() => handleNavigateToJob(activity)}
-                            className="w-full px-4 py-3 hover:bg-accent transition-colors text-left"
+                            className="w-full px-4 py-3 hover:bg-accent transition-colors text-left cursor-pointer group"
                           >
                             <div className="flex items-start gap-3">
                               <div className={cn(
@@ -294,9 +315,14 @@ export function NotificationsButton() {
                                   />
                                 </div>
                               </div>
-                              <ChevronRight className="h-4 w-4 text-muted-foreground/50 flex-shrink-0 mt-1" />
+                              <button
+                                onClick={(e) => dismissActivity(e, activity.id)}
+                                className="p-1 rounded hover:bg-muted-foreground/10 text-muted-foreground/0 group-hover:text-muted-foreground/50 hover:!text-foreground transition-colors flex-shrink-0"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
                             </div>
-                          </button>
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -313,10 +339,10 @@ export function NotificationsButton() {
                       </div>
                       <div className="divide-y divide-border">
                         {doneActivities.map((activity) => (
-                          <button
+                          <div
                             key={activity.id}
                             onClick={() => handleNavigateToJob(activity)}
-                            className="w-full px-4 py-3 hover:bg-accent transition-colors text-left"
+                            className="w-full px-4 py-3 hover:bg-accent transition-colors text-left cursor-pointer group"
                           >
                             <div className="flex items-start gap-3">
                               <div className={cn(
@@ -361,9 +387,14 @@ export function NotificationsButton() {
                                   </p>
                                 )}
                               </div>
-                              <ChevronRight className="h-4 w-4 text-muted-foreground/50 flex-shrink-0 mt-1" />
+                              <button
+                                onClick={(e) => dismissActivity(e, activity.id)}
+                                className="p-1 rounded hover:bg-muted-foreground/10 text-muted-foreground/0 group-hover:text-muted-foreground/50 hover:!text-foreground transition-colors flex-shrink-0"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
                             </div>
-                          </button>
+                          </div>
                         ))}
                       </div>
                     </div>

@@ -364,6 +364,25 @@ export default function RequestLogsPage() {
                   </section>
                 )}
 
+                {/* Source Images */}
+                {selectedLog.source_image_urls && selectedLog.source_image_urls.length > 0 && (
+                  <section>
+                    <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                      Source {selectedLog.source_image_urls.length === 1 ? 'Image' : 'Images'}
+                    </h3>
+                    <div className="flex items-start gap-3">
+                      {selectedLog.source_image_urls.map((url, idx) => (
+                        <img
+                          key={idx}
+                          src={url}
+                          alt={`Source ${idx + 1}`}
+                          className="h-32 w-auto rounded-lg object-contain bg-muted/50 border border-border"
+                        />
+                      ))}
+                    </div>
+                  </section>
+                )}
+
                 {/* Prompt */}
                 <section>
                   <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Prompt</h3>

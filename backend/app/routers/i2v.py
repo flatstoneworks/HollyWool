@@ -75,6 +75,7 @@ async def create_i2v_job(request: I2VGenerateRequest):
                 "image_asset_id": request.image_asset_id,
             },
             status="pending",
+            source_image_urls=job.source_image_urls if job.source_image_urls else None,
         )
         add_log(log_entry)
 

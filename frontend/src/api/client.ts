@@ -214,6 +214,7 @@ export interface RequestLog {
   duration_ms: number | null
   error: string | null
   result_id: string | null
+  source_image_urls: string[] | null
 }
 
 export interface RequestLogsResponse {

@@ -334,6 +334,7 @@ async def create_job(request: GenerateRequest):
             "loras": [{"lora_id": l.lora_id, "weight": l.weight} for l in (request.loras or [])],
         },
         status="pending",
+        source_image_urls=job.source_image_urls if job.source_image_urls else None,
     )
     add_log(log_entry)
 

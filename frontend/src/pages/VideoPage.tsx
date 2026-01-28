@@ -706,83 +706,238 @@ export function VideoPage() {
             )}
 
             {/* Active T2V jobs progress */}
-            {currentSessionActiveJobs.map((job) => (
-              <div key={job.id} className="max-w-2xl mx-auto p-6 rounded-xl glass">
-                <div className="flex items-center gap-4 mb-4">
-                  <Loader2 className="h-6 w-6 text-primary animate-spin" />
-                  <div>
-                    <p className="text-foreground font-medium">Generating video...</p>
-                    <p className="text-sm text-muted-foreground capitalize">
-                      {job.status.replace('_', ' ')}
-                      {job.download_progress > 0 && job.status === 'downloading' && (
-                        <span> - {Math.round(job.download_progress)}%</span>
-                      )}
-                    </p>
+            {currentSessionActiveJobs.map((job) => {
+              const steps = [
+                { id: 'download', label: 'Download', active: job.status === 'downloading', completed: ['loading_model', 'generating', 'saving'].includes(job.status), skipped: job.status === 'queued' ? undefined : !job.download_total_mb && job.status !== 'downloading' },
+                { id: 'load', label: 'Load Model', active: job.status === 'loading_model', completed: ['generating', 'saving'].includes(job.status) },
+                { id: 'generate', label: 'Generate', active: job.status === 'generating', completed: job.status === 'saving' },
+                { id: 'save', label: 'Save', active: job.status === 'saving', completed: false },
+              ]
+
+              return (
+                <div key={job.id} className="max-w-2xl mx-auto rounded-2xl overflow-hidden border border-primary/30 bg-primary/5">
+                  <div className="px-5 py-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
+                          <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                        </div>
+                        <span className="text-sm font-medium text-foreground">
+                          {job.status === 'queued' ? 'Queued — waiting to start' :
+                           job.status === 'downloading' ? 'Downloading model' :
+                           job.status === 'loading_model' ? 'Loading model into GPU' :
+                           job.status === 'saving' ? 'Encoding & saving video' :
+                           `Generating frames`}
+                        </span>
+                      </div>
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground/70">
+                        {job.model}
+                      </span>
+                    </div>
+
+                    {/* Step indicators */}
+                    <div className="flex items-center gap-1 mb-3">
+                      {steps.map((step, idx) => (
+                        <div key={step.id} className="flex items-center flex-1">
+                          <div className={cn(
+                            'flex-1 h-1.5 rounded-full transition-all duration-300',
+                            step.active ? 'bg-primary animate-pulse' :
+                            step.completed ? 'bg-primary' :
+                            step.skipped ? 'bg-muted' :
+                            'bg-accent'
+                          )} />
+                          {idx < steps.length - 1 && <div className="w-1" />}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-between text-[10px] text-muted-foreground/70 px-1">
+                      {steps.map(step => (
+                        <span key={step.id} className={cn(
+                          'transition-colors',
+                          step.active && 'text-primary font-medium',
+                          step.completed && 'text-muted-foreground',
+                          step.skipped && 'text-primary-foreground/20'
+                        )}>
+                          {step.label}
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Progress bar with percentage */}
+                    <div className="mt-3 flex items-center gap-2">
+                      <div className="flex-1 h-1.5 bg-accent rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all duration-300"
+                          style={{ width: `${job.status === 'downloading' ? job.download_progress : job.progress}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground min-w-[3ch]">
+                        {job.status === 'downloading'
+                          ? `${Math.round(job.download_progress)}%`
+                          : `${Math.round(job.progress)}%`}
+                      </span>
+                    </div>
+                    {/* Download details */}
+                    {job.status === 'downloading' && job.download_total_mb && (
+                      <div className="mt-1 text-xs text-muted-foreground/70">
+                        {job.download_total_mb > 1024
+                          ? `${(job.download_total_mb / 1024).toFixed(1)} GB`
+                          : `${Math.round(job.download_total_mb)} MB`}
+                        {job.download_speed_mbps && job.download_speed_mbps > 0 && (
+                          <> @ {job.download_speed_mbps.toFixed(1)} MB/s</>
+                        )}
+                      </div>
+                    )}
+                    {/* ETA */}
+                    {job.status !== 'downloading' && job.eta_seconds != null && job.eta_seconds > 0 && (
+                      <div className="mt-1 text-xs text-muted-foreground/70">
+                        ~{job.eta_seconds >= 60 ? `${Math.ceil(job.eta_seconds / 60)} min` : `${Math.round(job.eta_seconds)}s`} remaining
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Footer with job details and prompt */}
+                  <div className="px-5 py-3 border-t border-border">
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground/70 mb-2">
+                      <span>{job.width}x{job.height}</span>
+                      <span className="text-muted-foreground/30">&middot;</span>
+                      <span>{job.num_frames} frames</span>
+                      <span className="text-muted-foreground/30">&middot;</span>
+                      <span>{job.fps} fps</span>
+                      <span className="text-muted-foreground/30">&middot;</span>
+                      <span>{job.steps} steps</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground truncate">{job.prompt}</p>
                   </div>
                 </div>
-
-                {/* Progress bar */}
-                <div className="h-2 bg-accent rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary transition-all duration-300"
-                    style={{ width: `${job.progress}%` }}
-                  />
-                </div>
-
-                {job.eta_seconds && job.eta_seconds > 0 && (
-                  <p className="text-xs text-muted-foreground/70 mt-2">
-                    Estimated time: {Math.ceil(job.eta_seconds / 60)} min
-                  </p>
-                )}
-
-                <p className="text-xs text-muted-foreground/70 mt-2 truncate">
-                  "{job.prompt}"
-                </p>
-              </div>
-            ))}
+              )
+            })}
 
             {/* Active I2V jobs progress */}
-            {currentSessionActiveI2VJobs.map((job) => (
-              <div key={job.id} className="max-w-2xl mx-auto p-6 rounded-xl glass">
-                <div className="flex items-center gap-4 mb-4">
-                  <Loader2 className="h-6 w-6 text-primary animate-spin" />
-                  <div className="flex-1">
-                    <p className="text-foreground font-medium">Animating image...</p>
-                    <p className="text-sm text-muted-foreground capitalize">
-                      {job.status.replace('_', ' ')}
-                      {job.download_progress && job.download_progress > 0 && job.status === 'downloading' && (
-                        <span> - {Math.round(job.download_progress)}%</span>
-                      )}
-                    </p>
+            {currentSessionActiveI2VJobs.map((job) => {
+              const steps = [
+                { id: 'download', label: 'Download', active: job.status === 'downloading', completed: ['loading_model', 'generating', 'saving'].includes(job.status), skipped: job.status === 'queued' ? undefined : !job.download_total_mb && job.status !== 'downloading' },
+                { id: 'load', label: 'Load Model', active: job.status === 'loading_model', completed: ['generating', 'saving'].includes(job.status) },
+                { id: 'generate', label: 'Generate', active: job.status === 'generating', completed: job.status === 'saving' },
+                { id: 'save', label: 'Save', active: job.status === 'saving', completed: false },
+              ]
+
+              return (
+                <div key={job.id} className="max-w-2xl mx-auto rounded-2xl overflow-hidden border border-primary/30 bg-primary/5">
+                  <div className="px-5 py-4">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
+                          <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                        </div>
+                        <span className="text-sm font-medium text-foreground">
+                          {job.status === 'queued' ? 'Queued — waiting to start' :
+                           job.status === 'downloading' ? 'Downloading model' :
+                           job.status === 'loading_model' ? 'Loading model into GPU' :
+                           job.status === 'saving' ? 'Encoding & saving video' :
+                           `Animating image`}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-primary/20 text-primary flex items-center gap-1">
+                          <ImageIcon className="h-3 w-3" />
+                          I2V
+                        </span>
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground/70">
+                          {job.model}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Step indicators */}
+                    <div className="flex items-center gap-1 mb-3">
+                      {steps.map((step, idx) => (
+                        <div key={step.id} className="flex items-center flex-1">
+                          <div className={cn(
+                            'flex-1 h-1.5 rounded-full transition-all duration-300',
+                            step.active ? 'bg-primary animate-pulse' :
+                            step.completed ? 'bg-primary' :
+                            step.skipped ? 'bg-muted' :
+                            'bg-accent'
+                          )} />
+                          {idx < steps.length - 1 && <div className="w-1" />}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-between text-[10px] text-muted-foreground/70 px-1">
+                      {steps.map(step => (
+                        <span key={step.id} className={cn(
+                          'transition-colors',
+                          step.active && 'text-primary font-medium',
+                          step.completed && 'text-muted-foreground',
+                          step.skipped && 'text-primary-foreground/20'
+                        )}>
+                          {step.label}
+                        </span>
+                      ))}
+                    </div>
+
+                    {/* Progress bar with percentage */}
+                    <div className="mt-3 flex items-center gap-2">
+                      <div className="flex-1 h-1.5 bg-accent rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-primary transition-all duration-300"
+                          style={{ width: `${job.status === 'downloading' ? job.download_progress : job.progress}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground min-w-[3ch]">
+                        {job.status === 'downloading'
+                          ? `${Math.round(job.download_progress)}%`
+                          : `${Math.round(job.progress)}%`}
+                      </span>
+                    </div>
+                    {/* Download details */}
+                    {job.status === 'downloading' && job.download_total_mb && (
+                      <div className="mt-1 text-xs text-muted-foreground/70">
+                        {job.download_total_mb > 1024
+                          ? `${(job.download_total_mb / 1024).toFixed(1)} GB`
+                          : `${Math.round(job.download_total_mb)} MB`}
+                        {job.download_speed_mbps && job.download_speed_mbps > 0 && (
+                          <> @ {job.download_speed_mbps.toFixed(1)} MB/s</>
+                        )}
+                      </div>
+                    )}
+                    {/* ETA */}
+                    {job.status !== 'downloading' && job.eta_seconds != null && job.eta_seconds > 0 && (
+                      <div className="mt-1 text-xs text-muted-foreground/70">
+                        ~{job.eta_seconds >= 60 ? `${Math.ceil(job.eta_seconds / 60)} min` : `${Math.round(job.eta_seconds)}s`} remaining
+                      </div>
+                    )}
                   </div>
-                  {job.source_image_urls?.[0] && (
-                    <img
-                      src={job.source_image_urls?.[0]}
-                      alt="Source"
-                      className="h-16 w-auto rounded-lg object-cover"
-                    />
-                  )}
+
+                  {/* Footer with source image, details, and prompt */}
+                  <div className="px-5 py-3 border-t border-border">
+                    {job.source_image_urls?.[0] && (
+                      <div className="flex items-center gap-3 mb-2">
+                        {job.source_image_urls.map((url, idx) => (
+                          <img
+                            key={idx}
+                            src={url}
+                            alt={`Source ${idx + 1}`}
+                            className="h-12 w-auto rounded-lg object-cover"
+                          />
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground/70 mb-2">
+                      <span>{job.width}x{job.height}</span>
+                      <span className="text-muted-foreground/30">&middot;</span>
+                      <span>{job.num_frames} frames</span>
+                      <span className="text-muted-foreground/30">&middot;</span>
+                      <span>{job.fps} fps</span>
+                      <span className="text-muted-foreground/30">&middot;</span>
+                      <span>{job.steps} steps</span>
+                    </div>
+                    <p className="text-sm text-muted-foreground truncate">{job.prompt}</p>
+                  </div>
                 </div>
-
-                {/* Progress bar */}
-                <div className="h-2 bg-accent rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary transition-all duration-300"
-                    style={{ width: `${job.progress}%` }}
-                  />
-                </div>
-
-                {job.eta_seconds && job.eta_seconds > 0 && (
-                  <p className="text-xs text-muted-foreground/70 mt-2">
-                    Estimated time: {Math.ceil(job.eta_seconds / 60)} min
-                  </p>
-                )}
-
-                <p className="text-xs text-muted-foreground/70 mt-2 truncate">
-                  "{job.prompt}"
-                </p>
-              </div>
-            ))}
+              )
+            })}
 
             {/* Completed videos for this session */}
             {completedJobs.length > 0 && (

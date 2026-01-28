@@ -23,6 +23,7 @@ class RequestLog(BaseModel):
     duration_ms: Optional[int] = None
     error: Optional[str] = None
     result_id: Optional[str] = None  # Asset ID if completed
+    source_image_urls: Optional[List[str]] = None  # I2I/I2V source images
 
 
 class RequestLogsResponse(BaseModel):
