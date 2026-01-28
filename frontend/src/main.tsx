@@ -17,6 +17,7 @@ import { VideoAssetDetailPage } from './pages/VideoAssetDetailPage'
 import { BulkOperationPage } from './pages/BulkOperationPage'
 import SettingsPage from './pages/SettingsPage'
 import RequestLogsPage from './pages/RequestLogsPage'
+import QueuePage from './pages/QueuePage'
 import { Toaster } from './components/ui/toaster'
 import { toast } from './hooks/use-toast'
 import './index.css'
@@ -72,6 +73,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             {/* Main app with header */}
             <Route path="/" element={<Layout />}>
               <Route path="logs" element={<RequestLogsPage />} />
+              <Route path="queue" element={<QueuePage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route index element={<Navigate to="/image" replace />} />
               <Route path="image" element={<ImagePage />} />

@@ -1,5 +1,5 @@
 import { NavLink, Link, useLocation } from 'react-router-dom'
-import { Sparkles, ImageIcon, Film, Layers, Images, Box, FileText, Settings } from 'lucide-react'
+import { Sparkles, ImageIcon, Film, Layers, Images, Box, FileText, ListOrdered, Settings } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -59,6 +59,18 @@ export function NavSidebar() {
         >
           <FileText className="h-5 w-5" />
           <span className="nav-tooltip">Logs</span>
+        </NavLink>
+        <NavLink
+          to="/queue"
+          className={cn(
+            'flex items-center justify-center w-10 h-10 rounded-xl transition-colors group relative',
+            location.pathname === '/queue'
+              ? 'bg-primary/20 text-primary'
+              : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+          )}
+        >
+          <ListOrdered className="h-5 w-5" />
+          <span className="nav-tooltip">Queue</span>
         </NavLink>
         <NavLink
           to="/settings"

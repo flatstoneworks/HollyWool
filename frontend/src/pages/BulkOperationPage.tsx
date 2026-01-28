@@ -16,7 +16,7 @@ import {
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { api, type BulkJob, type BulkImageItem } from '@/api/client'
+import { api, type BulkImageItem } from '@/api/client'
 import { toast } from '@/hooks/use-toast'
 
 type Phase = 'input' | 'review' | 'generating'
@@ -130,7 +130,7 @@ export function BulkOperationPage() {
   // Prompt editing
   const handleStartEdit = (index: number) => {
     setEditingIndex(index)
-    setEditValue(prompts[index])
+    setEditValue(prompts[index] ?? '')
     setTimeout(() => editInputRef.current?.focus(), 50)
   }
 
