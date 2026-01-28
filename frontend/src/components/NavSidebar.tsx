@@ -1,10 +1,11 @@
 import { NavLink, Link, useLocation } from 'react-router-dom'
-import { Sparkles, ImageIcon, Film, Layers, Images, Box, FileText, ListOrdered, Settings } from 'lucide-react'
+import { Sparkles, ImageIcon, Film, Layers, Images, Box, FileText, ListOrdered, Settings, Workflow } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
   { to: '/image', icon: ImageIcon, label: 'Image' },
   { to: '/video', icon: Film, label: 'Video' },
+  { to: '/comfyui', icon: Workflow, label: 'ComfyUI' },
   { to: '/bulk', icon: Layers, label: 'Bulk' },
   { to: '/assets', icon: Images, label: 'Gallery' },
   { to: '/models', icon: Box, label: 'Models' },

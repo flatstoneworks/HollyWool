@@ -189,6 +189,21 @@ export interface VideoSessionsData {
   currentSessionId: string | null
 }
 
+// Bulk session types
+export interface BulkSession {
+  id: string
+  name: string
+  createdAt: string
+  bulkJobIds: string[]
+  thumbnail?: string
+  isAutoNamed?: boolean
+}
+
+export interface BulkSessionsData {
+  sessions: BulkSession[]
+  currentSessionId: string | null
+}
+
 // Settings types
 export type ThemeOption = 'light' | 'dark' | 'system'
 
@@ -242,7 +257,7 @@ export interface SystemInfo {
 }
 
 // Job types
-export type JobStatus = 'queued' | 'downloading' | 'loading_model' | 'generating' | 'saving' | 'completed' | 'failed'
+export type JobStatus = 'submitting' | 'queued' | 'downloading' | 'loading_model' | 'generating' | 'saving' | 'completed' | 'failed'
 
 export interface Job {
   id: string
@@ -257,6 +272,8 @@ export interface Job {
   download_progress: number
   download_total_mb: number | null
   download_speed_mbps: number | null
+  // Load progress (model loading into GPU)
+  load_progress: number
   // Request details
   prompt: string
   model: string
@@ -373,6 +390,8 @@ export interface VideoJob {
   download_progress: number
   download_total_mb: number | null
   download_speed_mbps: number | null
+  // Load progress (model loading into GPU)
+  load_progress: number
   // Request details
   prompt: string
   model: string
@@ -458,6 +477,8 @@ export interface I2VJob {
   download_progress: number
   download_total_mb: number | null
   download_speed_mbps: number | null
+  // Load progress (model loading into GPU)
+  load_progress: number
   prompt: string
   model: string
   source_image_urls: string[]
@@ -491,6 +512,9 @@ export interface SystemResourceStatus {
   memory_percent: number
   gpu_utilization: number | null
   cpu_percent: number
+  cpu_name: string | null
+  cpu_cores: number | null
+  cpu_threads: number | null
   is_available: boolean
   rejection_reason: string | null
 }
@@ -591,6 +615,7 @@ export interface BulkImageRequest {
   height?: number
   steps?: number
   base_prompt?: string
+  session_id?: string
 }
 
 export interface BulkImageItem {
@@ -791,6 +816,94 @@ export interface HFDownloadJob {
   completed_at?: string
 }
 
+// ============== ComfyUI Types ==============
+
+export interface ComfyUIEditableParameter {
+  node_id: string
+  node_class: string
+  input_name: string
+  input_type: 'STRING' | 'INT' | 'FLOAT' | 'COMBO' | 'IMAGE'
+  current_value: string | number | string[] | null
+  constraints: {
+    min?: number
+    max?: number
+    step?: number
+    choices?: string[]
+  }
+  display_name: string
+  category: 'prompt' | 'sampler' | 'dimensions' | 'model' | 'advanced'
+}
+
+export interface SavedWorkflow {
+  id: string
+  name: string
+  workflow_json: Record<string, unknown>
+  parameters: ComfyUIEditableParameter[]
+  created_at: string
+  updated_at?: string
+}
+
+export interface SavedWorkflowSummary {
+  id: string
+  name: string
+  parameter_count: number
+  created_at: string
+}
+
+export interface WorkflowImportRequest {
+  name: string
+  workflow_json: Record<string, unknown>
+}
+
+export interface WorkflowImportResponse {
+  id: string
+  name: string
+  parameters: ComfyUIEditableParameter[]
+  message: string
+}
+
+export interface ComfyUIGenerateRequest {
+  workflow_id: string
+  parameters?: Record<string, string | number>
+  session_id?: string
+}
+
+export interface ComfyUIJob {
+  id: string
+  session_id: string | null
+  status: JobStatus
+  progress: number
+  eta_seconds: number | null
+  error: string | null
+  workflow_id: string
+  workflow_name: string
+  parameters: Record<string, string | number>
+  prompt_id: string | null
+  current_node: string | null
+  images: ImageResult[]
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface ComfyUIJobResponse {
+  job_id: string
+  status: string
+  message: string
+}
+
+export interface ComfyUIJobListResponse {
+  jobs: ComfyUIJob[]
+}
+
+export interface ComfyUIStatusResponse {
+  available: boolean
+  server_url: string
+  queue_running: number
+  queue_pending: number
+  error: string | null
+}
+
 export const api = {
   async health(): Promise<HealthResponse> {
     const res = await fetch(`${API_BASE}/health`)
@@ -920,6 +1033,23 @@ export const api = {
       body: JSON.stringify(data),
     })
     if (!res.ok) throw new Error('Failed to save video sessions')
+    return res.json()
+  },
+
+  // Bulk session endpoints
+  async getBulkSessions(): Promise<BulkSessionsData> {
+    const res = await fetch(`${API_BASE}/bulk-sessions`)
+    if (!res.ok) throw new Error('Failed to fetch bulk sessions')
+    return res.json()
+  },
+
+  async saveBulkSessions(data: BulkSessionsData): Promise<BulkSessionsData> {
+    const res = await fetch(`${API_BASE}/bulk-sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    })
+    if (!res.ok) throw new Error('Failed to save bulk sessions')
     return res.json()
   },
 
@@ -1331,5 +1461,97 @@ export const api = {
       method: 'DELETE',
     })
     if (!res.ok) throw new Error('Failed to delete bulk job')
+  },
+
+  // ============== ComfyUI Endpoints ==============
+
+  async getComfyUIStatus(): Promise<ComfyUIStatusResponse> {
+    const res = await fetch(`${API_BASE}/comfyui/status`)
+    if (!res.ok) throw new Error('Failed to fetch ComfyUI status')
+    return res.json()
+  },
+
+  async getComfyUIWorkflows(): Promise<SavedWorkflowSummary[]> {
+    const res = await fetch(`${API_BASE}/comfyui/workflows`)
+    if (!res.ok) throw new Error('Failed to fetch workflows')
+    return res.json()
+  },
+
+  async getComfyUIWorkflow(workflowId: string): Promise<SavedWorkflow> {
+    const res = await fetch(`${API_BASE}/comfyui/workflows/${workflowId}`)
+    if (!res.ok) throw new Error('Workflow not found')
+    return res.json()
+  },
+
+  async importComfyUIWorkflow(request: WorkflowImportRequest): Promise<WorkflowImportResponse> {
+    const res = await fetch(`${API_BASE}/comfyui/workflows`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Failed to import workflow' }))
+      throw new Error(error.detail || 'Failed to import workflow')
+    }
+    return res.json()
+  },
+
+  async updateComfyUIWorkflow(workflowId: string, request: WorkflowImportRequest): Promise<SavedWorkflow> {
+    const res = await fetch(`${API_BASE}/comfyui/workflows/${workflowId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Failed to update workflow' }))
+      throw new Error(error.detail || 'Failed to update workflow')
+    }
+    return res.json()
+  },
+
+  async deleteComfyUIWorkflow(workflowId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/comfyui/workflows/${workflowId}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) throw new Error('Failed to delete workflow')
+  },
+
+  async createComfyUIJob(request: ComfyUIGenerateRequest): Promise<ComfyUIJobResponse> {
+    const res = await fetch(`${API_BASE}/comfyui/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    })
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Failed to create ComfyUI job' }))
+      throw new Error(error.detail || 'Failed to create ComfyUI job')
+    }
+    return res.json()
+  },
+
+  async getComfyUIJob(jobId: string): Promise<ComfyUIJob> {
+    const res = await fetch(`${API_BASE}/comfyui/jobs/${jobId}`)
+    if (!res.ok) throw new Error('ComfyUI job not found')
+    return res.json()
+  },
+
+  async getComfyUIJobs(params?: { session_id?: string; active_only?: boolean }): Promise<ComfyUIJobListResponse> {
+    const searchParams = new URLSearchParams()
+    if (params?.session_id) searchParams.set('session_id', params.session_id)
+    if (params?.active_only) searchParams.set('active_only', 'true')
+    const url = `${API_BASE}/comfyui/jobs${searchParams.toString() ? `?${searchParams}` : ''}`
+    const res = await fetch(url)
+    if (!res.ok) throw new Error('Failed to fetch ComfyUI jobs')
+    return res.json()
+  },
+
+  async interruptComfyUI(): Promise<void> {
+    const res = await fetch(`${API_BASE}/comfyui/interrupt`, { method: 'POST' })
+    if (!res.ok) throw new Error('Failed to interrupt ComfyUI')
+  },
+
+  async clearComfyUIQueue(): Promise<void> {
+    const res = await fetch(`${API_BASE}/comfyui/clear-queue`, { method: 'POST' })
+    if (!res.ok) throw new Error('Failed to clear ComfyUI queue')
   },
 }

@@ -105,6 +105,8 @@ class Job(BaseModel):
     download_progress: float = 0.0  # 0-100
     download_total_mb: Optional[float] = None
     download_speed_mbps: Optional[float] = None
+    # Load progress (model loading into GPU)
+    load_progress: float = 0.0  # 0-100
     # Request details
     prompt: str
     model: str
@@ -267,6 +269,8 @@ class VideoJob(BaseModel):
     download_progress: float = 0.0
     download_total_mb: Optional[float] = None
     download_speed_mbps: Optional[float] = None
+    # Load progress (model loading into GPU)
+    load_progress: float = 0.0  # 0-100
     # Request details
     prompt: str
     model: str
@@ -326,6 +330,9 @@ class SystemResourceStatus(BaseModel):
     memory_percent: float
     gpu_utilization: Optional[float] = None  # 0-100, None if unavailable
     cpu_percent: float
+    cpu_name: Optional[str] = None
+    cpu_cores: Optional[int] = None
+    cpu_threads: Optional[int] = None
     is_available: bool
     rejection_reason: Optional[str] = None
 
@@ -374,6 +381,8 @@ class I2VJob(BaseModel):
     download_progress: float = 0.0
     download_total_mb: Optional[float] = None
     download_speed_mbps: Optional[float] = None
+    # Load progress (model loading into GPU)
+    load_progress: float = 0.0  # 0-100
     # Request details
     prompt: str
     model: str
@@ -501,6 +510,7 @@ class BulkImageRequest(BaseModel):
     height: int = Field(default=1024, ge=256, le=2048)
     steps: Optional[int] = Field(default=None, ge=1, le=100)
     base_prompt: Optional[str] = None
+    session_id: Optional[str] = None
 
 
 class BulkJob(BaseModel):
@@ -534,3 +544,99 @@ class BulkJobResponse(BaseModel):
 class BulkJobListResponse(BaseModel):
     """Response listing bulk jobs."""
     jobs: list[BulkJob]
+
+
+# ============== ComfyUI Workflow Schemas ==============
+
+class ComfyUIEditableParameter(BaseModel):
+    """A single editable parameter extracted from a ComfyUI workflow."""
+    node_id: str
+    node_class: str
+    input_name: str
+    input_type: str  # STRING, INT, FLOAT, COMBO, IMAGE
+    current_value: Optional[str | int | float | list] = None
+    constraints: dict = {}  # min, max, step for numbers; choices for COMBO
+    display_name: str = ""
+    category: str = "advanced"  # prompt, sampler, dimensions, model, advanced
+
+
+class SavedWorkflow(BaseModel):
+    """A saved ComfyUI workflow with extracted parameters."""
+    id: str
+    name: str
+    workflow_json: dict  # The raw ComfyUI workflow
+    parameters: list[ComfyUIEditableParameter] = []
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+
+class SavedWorkflowSummary(BaseModel):
+    """Summary of a saved workflow (without full JSON)."""
+    id: str
+    name: str
+    parameter_count: int
+    created_at: datetime
+
+
+class ComfyUIGenerateRequest(BaseModel):
+    """Request to generate images using a ComfyUI workflow."""
+    workflow_id: str = Field(..., description="ID of the saved workflow to use")
+    parameters: dict = Field(default={}, description="Parameter overrides: {'node_id.input_name': value}")
+    session_id: Optional[str] = Field(default=None)
+
+
+class ComfyUIJob(BaseModel):
+    """ComfyUI generation job status."""
+    id: str
+    session_id: Optional[str] = None
+    status: str = JobStatus.QUEUED
+    progress: float = 0.0  # 0-100
+    eta_seconds: Optional[float] = None
+    error: Optional[str] = None
+    # Request details
+    workflow_id: str
+    workflow_name: str
+    parameters: dict = {}  # Applied parameters
+    # Execution tracking
+    prompt_id: Optional[str] = None  # ComfyUI prompt ID
+    current_node: Optional[str] = None  # Node being executed
+    # Result
+    images: list[ImageResult] = []
+    created_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+
+class ComfyUIJobResponse(BaseModel):
+    """Response when creating a ComfyUI job."""
+    job_id: str
+    status: str
+    message: str
+
+
+class ComfyUIJobListResponse(BaseModel):
+    """Response listing ComfyUI jobs."""
+    jobs: list[ComfyUIJob]
+
+
+class ComfyUIStatusResponse(BaseModel):
+    """ComfyUI server status."""
+    available: bool
+    server_url: str
+    queue_running: int = 0
+    queue_pending: int = 0
+    error: Optional[str] = None
+
+
+class WorkflowImportRequest(BaseModel):
+    """Request to import a ComfyUI workflow."""
+    name: str = Field(..., min_length=1, max_length=100)
+    workflow_json: dict = Field(..., description="ComfyUI workflow in API format")
+
+
+class WorkflowImportResponse(BaseModel):
+    """Response after importing a workflow."""
+    id: str
+    name: str
+    parameters: list[ComfyUIEditableParameter]
+    message: str

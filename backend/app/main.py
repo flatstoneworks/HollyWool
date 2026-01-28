@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .routers import generate, assets, providers, settings, civitai, video, i2v, upscale, system, bulk
+from .routers import generate, assets, providers, settings, civitai, video, i2v, upscale, system, bulk, comfyui
 
 
 def load_config() -> dict:
@@ -47,6 +47,7 @@ app.include_router(i2v.router)
 app.include_router(upscale.router)
 app.include_router(system.router)
 app.include_router(bulk.router)
+app.include_router(comfyui.router)
 
 
 @app.get("/")

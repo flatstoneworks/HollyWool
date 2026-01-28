@@ -15,11 +15,13 @@ import { ModelDetailPage } from './pages/ModelDetailPage'
 import { AssetDetailPage } from './pages/AssetDetailPage'
 import { VideoAssetDetailPage } from './pages/VideoAssetDetailPage'
 import { BulkOperationPage } from './pages/BulkOperationPage'
+import { ComfyUIPage } from './pages/ComfyUIPage'
 import SettingsPage from './pages/SettingsPage'
 import RequestLogsPage from './pages/RequestLogsPage'
 import QueuePage from './pages/QueuePage'
 import { Toaster } from './components/ui/toaster'
 import { toast } from './hooks/use-toast'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import './index.css'
 
 // Redirect to spark.local if running on a DGX Spark and accessed via localhost
@@ -62,34 +64,37 @@ const queryClient = new QueryClient({
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <Routes>
-            {/* Full-screen views (no header) */}
-            <Route path="asset/:assetId" element={<AssetDetailPage />} />
-            <Route path="asset/video/:assetId" element={<VideoAssetDetailPage />} />
+    <ErrorBoundary>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <Routes>
+              {/* Full-screen views (no header) */}
+              <Route path="asset/:assetId" element={<AssetDetailPage />} />
+              <Route path="asset/video/:assetId" element={<VideoAssetDetailPage />} />
 
-            {/* Main app with header */}
-            <Route path="/" element={<Layout />}>
-              <Route path="logs" element={<RequestLogsPage />} />
-              <Route path="queue" element={<QueuePage />} />
-              <Route path="settings" element={<SettingsPage />} />
-              <Route index element={<Navigate to="/image" replace />} />
-              <Route path="image" element={<ImagePage />} />
-              <Route path="video" element={<VideoPage />} />
-              <Route path="bulk" element={<BulkOperationPage />} />
-              <Route path="assets" element={<AssetsPage />} />
-              <Route path="models" element={<ModelsPage />} />
-              <Route path="models/civitai/:modelId" element={<CivitaiModelDetailPage />} />
-              <Route path="provider/:providerId" element={<ProviderDetailPage />} />
-              <Route path="model/:modelId" element={<ModelDetailPage />} />
-              <Route path="job/:jobId" element={<JobDetailPage />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </QueryClientProvider>
-      <Toaster />
-    </ThemeProvider>
+              {/* Main app with header */}
+              <Route path="/" element={<Layout />}>
+                <Route path="logs" element={<RequestLogsPage />} />
+                <Route path="queue" element={<QueuePage />} />
+                <Route path="settings" element={<SettingsPage />} />
+                <Route index element={<Navigate to="/image" replace />} />
+                <Route path="image" element={<ImagePage />} />
+                <Route path="video" element={<VideoPage />} />
+                <Route path="bulk" element={<BulkOperationPage />} />
+                <Route path="comfyui" element={<ComfyUIPage />} />
+                <Route path="assets" element={<AssetsPage />} />
+                <Route path="models" element={<ModelsPage />} />
+                <Route path="models/civitai/:modelId" element={<CivitaiModelDetailPage />} />
+                <Route path="provider/:providerId" element={<ProviderDetailPage />} />
+                <Route path="model/:modelId" element={<ModelDetailPage />} />
+                <Route path="job/:jobId" element={<JobDetailPage />} />
+              </Route>
+            </Routes>
+          </BrowserRouter>
+        </QueryClientProvider>
+        <Toaster />
+      </ThemeProvider>
+    </ErrorBoundary>
   </React.StrictMode>
 )
